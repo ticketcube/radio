@@ -1,37 +1,34 @@
-# Complete Linode Deployment Guide
+# Linode Deployment Guide (Cloud Supabase Version)
 
-Deploy AzuraCast + Self-hosted Supabase + OTW Radio Site on a single Linode server.
+Deploy AzuraCast + OTW Radio Site on Linode with cloud-hosted Supabase.
 
 ## Server Requirements
 
-**Recommended Linode Plan:** Dedicated 8GB ($36/month)
-- 4 CPU Cores
-- 8GB RAM
-- 160GB Storage
-- 5TB Transfer
+**Recommended Linode Plan:** Shared 4GB ($24/month)
+- 2 CPU Cores
+- 4GB RAM
+- 80GB Storage
+- 4TB Transfer
 
-**Minimum:** Shared 4GB ($24/month) - May be tight under load
+**Minimum:** Shared 2GB ($12/month) - For testing only
 
 ## Architecture Overview
 
 ```
-Linode Server (Single Instance)
+Linode Server
 ├── AzuraCast (Docker) - Ports 80, 443, 8000-8999
-├── Supabase Stack (Docker Compose)
-│   ├── PostgreSQL - Port 5432
-│   ├── Auth (GoTrue) - Port 9999
-│   ├── REST API (PostgREST) - Port 3001
-│   ├── Storage API - Port 5000
-│   └── Studio (Admin UI) - Port 3002
 ├── Next.js Radio Site (PM2) - Port 3000
-└── Nginx (Reverse Proxy) - Frontend to all services
+└── Nginx (Reverse Proxy) - Routes to Next.js and AzuraCast
+
+External Services (No Migration)
+└── Supabase Cloud - Database, Auth, Storage
 ```
 
 ## Step 1: Initial Server Setup
 
 ```bash
 # SSH into your Linode
-ssh root@your-server-ip
+ssh root@YOUR_SERVER_IP
 
 # Update system
 apt update && apt upgrade -y
@@ -65,91 +62,24 @@ chmod +x docker.sh
 # Run installation
 ./docker.sh install
 
-# Note the admin password it generates
+# SAVE THE ADMIN PASSWORD IT GENERATES!
 ```
 
-AzuraCast will be available at: `http://your-server-ip` (port 80)
+AzuraCast will be available at: `http://YOUR_SERVER_IP` (port 80)
 
-## Step 3: Install Self-hosted Supabase
+**Initial AzuraCast Setup:**
+1. Visit `http://YOUR_SERVER_IP` and login with generated credentials
+2. Create a station (Station ID will be 1)
+3. Configure streaming settings
+4. Note your API URL: `http://YOUR_SERVER_IP/api`
 
-```bash
-# Clone Supabase
-cd /opt
-git clone --depth 1 https://github.com/supabase/supabase
-cd supabase/docker
-
-# Generate secure keys
-cat > .env << 'EOF'
-############
-# Secrets
-############
-POSTGRES_PASSWORD=$(openssl rand -base64 32)
-JWT_SECRET=$(openssl rand -base64 32)
-ANON_KEY=$(openssl rand -base64 32)
-SERVICE_ROLE_KEY=$(openssl rand -base64 32)
-DASHBOARD_USERNAME=admin
-DASHBOARD_PASSWORD=$(openssl rand -base64 16)
-
-############
-# Database
-############
-POSTGRES_HOST=db
-POSTGRES_DB=postgres
-POSTGRES_PORT=5432
-
-############
-# API
-############
-API_EXTERNAL_URL=https://supabase-api.yourdomain.com
-STUDIO_DEFAULT_ORGANIZATION=OTW Radio
-STUDIO_DEFAULT_PROJECT=Production
-
-############
-# Auth
-############
-SITE_URL=https://radio.yourdomain.com
-ADDITIONAL_REDIRECT_URLS=
-JWT_EXPIRY=3600
-DISABLE_SIGNUP=false
-MAILER_URLPATHS_CONFIRMATION=/auth/confirm
-MAILER_URLPATHS_INVITE=/auth/invite
-MAILER_URLPATHS_RECOVERY=/auth/reset-password
-
-############
-# Email (Configure with your SMTP)
-############
-SMTP_ADMIN_EMAIL=admin@yourdomain.com
-SMTP_HOST=smtp.sendgrid.net
-SMTP_PORT=587
-SMTP_USER=apikey
-SMTP_PASS=your_sendgrid_api_key
-SMTP_SENDER_NAME=OTW Radio
-EOF
-
-# Start Supabase
-docker-compose up -d
-
-# Wait for services to start (takes ~2 minutes)
-sleep 120
-
-# Check status
-docker-compose ps
-```
-
-**Save these credentials safely:**
-- Anon Key: `echo $ANON_KEY`
-- Service Role Key: `echo $SERVICE_ROLE_KEY`
-- Dashboard Password: `echo $DASHBOARD_PASSWORD`
-
-Supabase Studio: `http://your-server-ip:3002`
-
-## Step 4: Deploy Next.js Radio Site
+## Step 3: Deploy Next.js Radio Site
 
 ```bash
 # Clone your repository
 cd /opt
-git clone https://github.com/yourusername/otw-radio.git
-cd otw-radio
+git clone https://github.com/YOUR_USERNAME/REPO_NAME.git radio-site
+cd radio-site
 
 # Install dependencies
 npm install
@@ -157,30 +87,46 @@ npm install
 # Create production environment file
 cat > .env.local << 'EOF'
 # AzuraCast Connection
-NEXT_PUBLIC_AZURACAST_API_URL=https://your-azuracast-domain.com/api
+NEXT_PUBLIC_AZURACAST_API_URL=http://localhost/api
 NEXT_PUBLIC_AZURACAST_STATION_ID=1
 
-# Self-hosted Supabase Connection
-NEXT_PUBLIC_SUPABASE_URL=https://supabase-api.yourdomain.com
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key_from_step3
-SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_from_step3
+# Cloud Supabase (EXISTING - NO MIGRATION)
+NEXT_PUBLIC_SUPABASE_URL=YOUR_EXISTING_SUPABASE_URL
+NEXT_PUBLIC_SUPABASE_ANON_KEY=YOUR_EXISTING_ANON_KEY
+SUPABASE_SERVICE_ROLE_KEY=YOUR_EXISTING_SERVICE_ROLE_KEY
 
 # Site Configuration
 NEXT_PUBLIC_SITE_URL=https://radio.yourdomain.com
+NODE_ENV=production
 EOF
+
+# Edit .env.local with your actual values
+nano .env.local
 
 # Build production app
 npm run build
 
 # Start with PM2
-pm2 start npm --name "otw-radio" -- start
+pm2 start npm --name "radio-site" -- start
 pm2 save
 pm2 startup
-# Run the command PM2 outputs
+# Run the command PM2 outputs to enable startup on boot
 
 # Verify it's running
 pm2 list
+curl http://localhost:3000
 ```
+
+## Step 4: Configure DNS
+
+Add these A records in your DNS provider (e.g., Cloudflare, Namecheap):
+
+```
+radio.yourdomain.com    → YOUR_SERVER_IP
+stream.yourdomain.com   → YOUR_SERVER_IP  (for AzuraCast if separate)
+```
+
+**Wait 5-10 minutes for DNS propagation before next step.**
 
 ## Step 5: Configure Nginx Reverse Proxy
 
@@ -188,12 +134,17 @@ pm2 list
 # Remove default site
 rm /etc/nginx/sites-enabled/default
 
-# Create main radio site config
+# Create radio site config
 cat > /etc/nginx/sites-available/radio << 'EOF'
 # Main Radio Site
 server {
     listen 80;
     server_name radio.yourdomain.com;
+
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
 
     location / {
         proxy_pass http://localhost:3000;
@@ -205,51 +156,18 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_cache_bypass $http_upgrade;
+        
+        # Timeouts
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
     }
-}
 
-# Supabase API
-server {
-    listen 80;
-    server_name supabase-api.yourdomain.com;
-
-    location / {
-        proxy_pass http://localhost:3001;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-
-# Supabase Auth
-server {
-    listen 80;
-    server_name supabase-auth.yourdomain.com;
-
-    location / {
-        proxy_pass http://localhost:9999;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-
-# Supabase Studio (Admin Dashboard)
-server {
-    listen 80;
-    server_name supabase-studio.yourdomain.com;
-
-    location / {
-        proxy_pass http://localhost:3002;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+    # Static assets caching
+    location /_next/static {
+        proxy_pass http://localhost:3000;
+        proxy_cache_valid 200 60m;
+        add_header Cache-Control "public, max-age=3600, immutable";
     }
 }
 EOF
@@ -264,90 +182,53 @@ nginx -t
 systemctl restart nginx
 ```
 
-## Step 6: Configure DNS
+**Test:** Visit `http://radio.yourdomain.com` (without SSL yet)
 
-Add these A records in your DNS provider:
-
-```
-radio.yourdomain.com         → your-server-ip
-supabase-api.yourdomain.com  → your-server-ip
-supabase-auth.yourdomain.com → your-server-ip
-supabase-studio.yourdomain.com → your-server-ip
-```
-
-**Note:** AzuraCast should already be configured on your main domain.
-
-## Step 7: Enable SSL Certificates
+## Step 6: Enable SSL Certificates
 
 ```bash
-# Install certificates for all domains
+# Install certificate
 certbot --nginx -d radio.yourdomain.com
-certbot --nginx -d supabase-api.yourdomain.com
-certbot --nginx -d supabase-auth.yourdomain.com
-certbot --nginx -d supabase-studio.yourdomain.com
 
-# Certificates will auto-renew
+# Test auto-renewal
+certbot renew --dry-run
 ```
 
-## Step 8: Migrate Data from Cloud Supabase
-
-### Export from Cloud Supabase
+**After SSL is installed, update AzuraCast URLs in .env.local:**
 
 ```bash
-# Install Supabase CLI locally (on your computer)
-npm install -g supabase
-
-# Login to your cloud project
-supabase login
-
-# Link to your project
-supabase link --project-ref your-project-ref
-
-# Dump your database schema and data
-supabase db dump --data-only > data.sql
-supabase db dump > schema.sql
-```
-
-### Import to Self-hosted Supabase
-
-```bash
-# Copy files to server
-scp schema.sql data.sql root@your-server-ip:/tmp/
-
-# SSH into server
-ssh root@your-server-ip
-
-# Import schema
-docker exec -i supabase-db psql -U postgres -d postgres < /tmp/schema.sql
-
-# Import data
-docker exec -i supabase-db psql -U postgres -d postgres < /tmp/data.sql
-
-# Verify
-docker exec -it supabase-db psql -U postgres -d postgres
-\dt
-SELECT * FROM auth.users;
-\q
-```
-
-## Step 9: Update Next.js Environment
-
-```bash
-cd /opt/otw-radio
-
-# Update .env.local with self-hosted Supabase URLs
+cd /opt/radio-site
 nano .env.local
+# Change NEXT_PUBLIC_AZURACAST_API_URL to https if AzuraCast has SSL
+# Change NEXT_PUBLIC_SITE_URL to https://radio.yourdomain.com
 
-# Rebuild app
+# Rebuild and restart
 npm run build
-
-# Restart PM2
-pm2 restart otw-radio
+pm2 restart radio-site
 ```
 
-## Step 10: Setup Backups
+## Step 7: Configure AzuraCast
+
+### Update Base URL
+1. SSH: `cd /var/azuracast && ./docker.sh cli`
+2. Run: `azuracast settings:set SITE_BASE_URL https://stream.yourdomain.com`
+3. Exit CLI: `exit`
+
+### Enable CORS for Radio Site
+1. Visit AzuraCast admin: `https://stream.yourdomain.com`
+2. Go to **Administration → System Settings**
+3. Under **Security**, add to **CORS Allowed Origins**:
+   ```
+   https://radio.yourdomain.com
+   ```
+4. Save changes
+
+## Step 8: Setup Backups
 
 ```bash
+# Create backup directory
+mkdir -p /backups/otw-radio
+
 # Create backup script
 cat > /root/backup-otw.sh << 'EOF'
 #!/bin/bash
@@ -356,14 +237,15 @@ DATE=$(date +%Y%m%d_%H%M%S)
 
 mkdir -p $BACKUP_DIR
 
-# Backup Supabase Database
-docker exec supabase-db pg_dump -U postgres postgres | gzip > $BACKUP_DIR/supabase_$DATE.sql.gz
-
 # Backup AzuraCast Database
 docker exec azuracast_mariadb mysqldump -u azuracast -p$(docker exec azuracast bash -c 'echo $MYSQL_PASSWORD') azuracast | gzip > $BACKUP_DIR/azuracast_$DATE.sql.gz
 
+# Backup Next.js App
+tar -czf $BACKUP_DIR/radio-site_$DATE.tar.gz /opt/radio-site --exclude node_modules --exclude .next
+
 # Keep only last 7 days
 find $BACKUP_DIR -name "*.gz" -mtime +7 -delete
+find $BACKUP_DIR -name "*.tar.gz" -mtime +7 -delete
 
 echo "Backup completed: $DATE"
 EOF
@@ -384,65 +266,54 @@ crontab -e
 # AzuraCast
 cd /var/azuracast && ./docker.sh status
 
-# Supabase
-cd /opt/supabase/docker && docker-compose ps
-
 # Next.js Site
 pm2 status
 
 # Nginx
 systemctl status nginx
+
+# Server resources
+htop
+df -h
+free -h
 ```
 
 ### View Logs
 
 ```bash
 # Next.js logs
-pm2 logs otw-radio
-
-# Supabase logs
-cd /opt/supabase/docker && docker-compose logs -f
+pm2 logs radio-site
 
 # AzuraCast logs
 cd /var/azuracast && ./docker.sh logs
+
+# Nginx access logs
+tail -f /var/log/nginx/access.log
+
+# Nginx error logs
+tail -f /var/log/nginx/error.log
 ```
 
 ### Update Services
 
 ```bash
 # Update Next.js site
-cd /opt/otw-radio
+cd /opt/radio-site
 git pull
 npm install
 npm run build
-pm2 restart otw-radio
-
-# Update Supabase
-cd /opt/supabase/docker
-git pull
-docker-compose pull
-docker-compose up -d
+pm2 restart radio-site
 
 # Update AzuraCast
 cd /var/azuracast
 ./docker.sh update-self
 ./docker.sh update
+
+# Update system packages
+apt update && apt upgrade -y
 ```
 
 ## Troubleshooting
-
-### Supabase Connection Issues
-
-```bash
-# Check if PostgreSQL is accessible
-docker exec -it supabase-db psql -U postgres
-\l
-\q
-
-# Restart Supabase services
-cd /opt/supabase/docker
-docker-compose restart
-```
 
 ### Next.js Site Not Loading
 
@@ -451,25 +322,53 @@ docker-compose restart
 pm2 status
 
 # View error logs
-pm2 logs otw-radio --err
+pm2 logs radio-site --err
 
 # Restart
-pm2 restart otw-radio
+pm2 restart radio-site
 
-# Clear logs and restart fresh
-pm2 flush
-pm2 restart otw-radio
+# If port 3000 is in use
+netstat -tulpn | grep :3000
+kill -9 <PID>
+pm2 restart radio-site
 ```
 
-### Port Conflicts
+### AzuraCast Issues
 
 ```bash
-# Check what's using a port
-netstat -tulpn | grep :3000
+# Restart AzuraCast
+cd /var/azuracast
+./docker.sh restart
 
-# Kill process if needed
-kill -9 <PID>
+# Check Docker containers
+docker ps -a
+
+# View specific service logs
+docker logs azuracast_web
+docker logs azuracast_mariadb
+docker logs azuracast_redis
 ```
+
+### SSL Certificate Issues
+
+```bash
+# Renew certificates manually
+certbot renew --force-renewal
+
+# Check certificate status
+certbot certificates
+
+# If renewal fails, check Nginx config
+nginx -t
+```
+
+### Supabase Connection Issues
+
+Since Supabase is cloud-hosted, check:
+1. Environment variables in `/opt/radio-site/.env.local`
+2. Network connectivity: `curl https://YOUR_SUPABASE_URL/rest/v1/`
+3. Supabase service status: https://status.supabase.com
+4. API keys are correct (anon key, service role key)
 
 ## Security Hardening
 
@@ -481,7 +380,12 @@ ufw allow 443/tcp
 ufw allow 8000:8999/tcp  # AzuraCast streaming ports
 ufw enable
 
-# Disable root SSH login
+# Create non-root user
+adduser deploy
+usermod -aG sudo deploy
+usermod -aG docker deploy
+
+# Disable root SSH login (after testing with deploy user)
 nano /etc/ssh/sshd_config
 # Set: PermitRootLogin no
 systemctl restart sshd
@@ -489,26 +393,68 @@ systemctl restart sshd
 # Enable automatic security updates
 apt install unattended-upgrades
 dpkg-reconfigure -plow unattended-upgrades
+
+# Setup fail2ban for SSH protection
+apt install fail2ban
+systemctl enable fail2ban
+systemctl start fail2ban
 ```
 
 ## Cost Breakdown
 
-- **Linode Server:** $36/month (Dedicated 8GB)
+- **Linode Server:** $24/month (Shared 4GB)
+- **Supabase Cloud:** $0-25/month (Free tier or Pro)
 - **Domain:** ~$12/year
-- **Total:** ~$37/month (vs. $80+/month for separate hosting)
+- **Total:** ~$25-50/month
+
+## Performance Optimization
+
+```bash
+# Enable Nginx gzip compression
+nano /etc/nginx/nginx.conf
+# Add in http block:
+# gzip on;
+# gzip_vary on;
+# gzip_min_length 1024;
+# gzip_types text/plain text/css text/xml text/javascript application/javascript application/json;
+
+# Restart Nginx
+systemctl restart nginx
+
+# PM2 cluster mode for multi-core usage
+pm2 delete radio-site
+pm2 start npm --name "radio-site" -i max -- start
+pm2 save
+```
 
 ## Access URLs (After Setup)
 
 - **Radio Site:** https://radio.yourdomain.com
-- **AzuraCast:** https://yourdomain.com
-- **Supabase Studio:** https://supabase-studio.yourdomain.com
-- **Supabase API:** https://supabase-api.yourdomain.com
+- **AzuraCast:** https://stream.yourdomain.com (or main domain)
+- **Supabase Studio:** https://app.supabase.com (cloud dashboard)
+
+## Deployment Checklist
+
+- [ ] Linode server provisioned and accessible via SSH
+- [ ] Docker and Node.js installed
+- [ ] AzuraCast installed and configured
+- [ ] DNS A records created and propagated
+- [ ] Next.js site cloned and built
+- [ ] PM2 running and configured for startup
+- [ ] Nginx reverse proxy configured
+- [ ] SSL certificates installed via Certbot
+- [ ] Environment variables configured correctly
+- [ ] AzuraCast CORS settings updated
+- [ ] Backups configured and tested
+- [ ] Firewall enabled and ports allowed
+- [ ] Site accessible at https://radio.yourdomain.com
 
 ## Next Steps
 
-1. Configure AzuraCast station settings
-2. Upload media to AzuraCast
-3. Create playlists in Supabase Studio
-4. Test authentication flows
-5. Setup monitoring (optional: Uptime Robot, StatusCake)
-6. Configure email SMTP for Supabase auth emails
+1. Import your playlists into AzuraCast
+2. Test authentication flows with cloud Supabase
+3. Setup monitoring (optional: Uptime Robot, StatusCake)
+4. Configure custom domain email for notifications
+5. Test all features (player, schedule, auth, etc.)
+6. Update any external integrations to point to new domain
+7. Consider CDN (Cloudflare) for additional performance
