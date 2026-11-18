@@ -91,12 +91,13 @@ function AnalyticsContent() {
     };
 
     fetchData();
+    // Changed from 30000 (30s) to 120000 (2min) to reduce API load
     const interval = setInterval(() => {
       fetch("/api/analytics/listeners")
         .then(res => res.json())
         .then(data => setListeners(data))
         .catch(console.error);
-    }, 30000);
+    }, 120000);
 
     return () => clearInterval(interval);
   }, [timeRange]);

@@ -10,7 +10,7 @@ const BASE_URL =
 const API_KEY = process.env.AZURACAST_API_KEY;
 const STATION = process.env.AZURACAST_STATION_ID || process.env.NEXT_PUBLIC_STATION_SHORTCODE || "otw_radio";
 
-const CACHE_MS = 30_000;
+const CACHE_MS = 120_000;
 // A bucket shows a city name only when at least this many listeners share it.
 const MIN_FOR_CITY = 1;
 
@@ -133,7 +133,8 @@ async function publicListenerCount(): Promise<number> {
 export default async function handler(req: NextApiRequest, res: NextApiResponse<ListenersMapResponse | { error: string }>) {
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
 
-  res.setHeader("Cache-Control", "public, s-maxage=30, stale-while-revalidate=60");
+  // Increased cache headers - 2 minute cache, 4 minute stale-while-revalidate
+  res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=240");
 
   if (req.query.demo === "1") {
     return res.status(200).json({ ...aggregate(demoData()), source: "demo", updated: new Date().toISOString() });

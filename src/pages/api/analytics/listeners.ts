@@ -16,12 +16,22 @@ interface ListenersResponse {
   current: ListenerLocation[];
 }
 
+// In-memory cache to reduce Supabase auth overhead
+let cache: { data: ListenersResponse; timestamp: number } | null = null;
+const CACHE_TTL = 60000; // 1 minute cache
+
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse<ListenersResponse | { error: string }>
 ) {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  // Return cached data if available and fresh
+  if (cache && Date.now() - cache.timestamp < CACHE_TTL) {
+    res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=120");
+    return res.status(200).json(cache.data);
   }
 
   // Admin-only authentication check
@@ -112,7 +122,10 @@ export default async function handler(
       current
     };
 
-    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    // Cache the result
+    cache = { data: result, timestamp: Date.now() };
+
+    res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=120");
     res.status(200).json(result);
   } catch (error) {
     console.error("Failed to fetch listeners:", error);

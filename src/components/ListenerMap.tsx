@@ -40,7 +40,7 @@ interface ListenerMapProps {
 
 const COLS = LAND_ROWS[0].length;
 const ROWS = LAND_ROWS.length;
-const REFRESH_MS = 30000;
+const REFRESH_MS = 120000; // Changed from 30000 (30s) to 120000 (2min) - saves 75% of requests
 
 const project = (lat: number, lon: number) => ({
   x: (lon + 180) / DOT_STEP,
@@ -67,34 +67,56 @@ export function ListenerMap({ nowPlaying }: ListenerMapProps) {
   const [lastSubmit, setLastSubmit] = useState<number>(0);
   const [cooldown, setCooldown] = useState<number>(0);
   const [supabase] = useState(() => createClient());
+  const [sessionReady, setSessionReady] = useState(false); // Track if session is initialized
   const svgRef = useRef<SVGSVGElement>(null);
 
-  // Fetch mood categories for legend/buttons
+  // Fetch mood categories for legend/buttons - with caching
   useEffect(() => {
     const fetchMoods = async () => {
       try {
-        // Check feature flag
-        const flagResponse = await fetch("/api/admin/feature-flags");
-        const flagData = await flagResponse.json();
-        const moodFlag = flagData.data?.find((f: any) => f.flag_name === "mood_tracker_enabled");
-        const isEnabled = moodFlag?.enabled === true;
+        // Check feature flag with client-side cache
+        const cachedFlag = sessionStorage.getItem('mood_flag_cache');
+        const cachedTime = sessionStorage.getItem('mood_flag_cache_time');
+        const now = Date.now();
+        
+        let isEnabled = false;
+        
+        if (cachedFlag && cachedTime && (now - parseInt(cachedTime)) < 300000) {
+          // Use 5-minute cache
+          isEnabled = cachedFlag === 'true';
+        } else {
+          const flagResponse = await fetch("/api/admin/feature-flags");
+          const flagData = await flagResponse.json();
+          const moodFlag = flagData.data?.find((f: any) => f.flag_name === "mood_tracker_enabled");
+          isEnabled = moodFlag?.enabled === true;
+          
+          // Cache the result
+          sessionStorage.setItem('mood_flag_cache', String(isEnabled));
+          sessionStorage.setItem('mood_flag_cache_time', String(now));
+        }
+        
         setMoodEnabled(isEnabled);
 
         if (isEnabled) {
-          // Ensure user session exists
-          const { data: { user } } = await supabase.auth.getUser();
-          if (!user) {
-            await supabase.auth.signInAnonymously();
-          }
+          // Fetch mood categories with cache
+          const cachedMoods = sessionStorage.getItem('mood_categories_cache');
+          const cachedMoodsTime = sessionStorage.getItem('mood_categories_cache_time');
+          
+          if (cachedMoods && cachedMoodsTime && (now - parseInt(cachedMoodsTime)) < 300000) {
+            // Use 5-minute cache
+            setMoods(JSON.parse(cachedMoods));
+          } else {
+            const { data: moodData } = await supabase
+              .from("mood_categories")
+              .select("id, category_name, emoji, label, color_hsl, quadrant_position")
+              .eq("enabled", true)
+              .order("display_order");
 
-          const { data: moodData } = await supabase
-            .from("mood_categories")
-            .select("id, category_name, emoji, label, color_hsl, quadrant_position")
-            .eq("enabled", true)
-            .order("display_order");
-
-          if (moodData) {
-            setMoods(moodData);
+            if (moodData) {
+              setMoods(moodData);
+              sessionStorage.setItem('mood_categories_cache', JSON.stringify(moodData));
+              sessionStorage.setItem('mood_categories_cache_time', String(now));
+            }
           }
         }
       } catch (error) {
@@ -113,7 +135,7 @@ export function ListenerMap({ nowPlaying }: ListenerMapProps) {
     }
   }, [cooldown]);
 
-  // Fetch listeners data
+  // Fetch listeners data with 2-minute interval
   useEffect(() => {
     const fetchListeners = async () => {
       try {
@@ -154,6 +176,15 @@ export function ListenerMap({ nowPlaying }: ListenerMapProps) {
     setTimeout(() => setTappedEmoji(null), 600);
 
     try {
+      // LAZY ANONYMOUS AUTH - Only create session when user actually interacts
+      if (!sessionReady) {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          await supabase.auth.signInAnonymously();
+        }
+        setSessionReady(true);
+      }
+      
       // Get current session
       const { data: { user } } = await supabase.auth.getUser();
       
