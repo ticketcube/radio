@@ -74,6 +74,20 @@ export default function AdminFeatures() {
     }
   };
 
+  const fetchFlags = async () => {
+    setLoading(true);
+    try {
+      // Use cached endpoint but skip cache for admin page (add cache-busting query)
+      const response = await fetch(`/api/feature-flags-cached?bust=${Date.now()}`);
+      const data = await response.json();
+      setFlags(data.data || []);
+    } catch (error) {
+      console.error("Failed to fetch feature flags:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const toggleFlag = async (flagId: string, currentValue: boolean) => {
     try {
       const { error } = await supabase

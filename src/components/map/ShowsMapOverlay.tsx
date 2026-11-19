@@ -21,7 +21,7 @@ interface ShowsMapOverlayProps {
   height: number;
 }
 
-const POLLING_INTERVAL_MS = 120000; // 2 minutes to match other components
+const POLLING_INTERVAL_MS = 120000; // 2 minutes
 
 export function ShowsMapOverlay({ width, height }: ShowsMapOverlayProps) {
   const [enabled, setEnabled] = useState(false);
@@ -31,6 +31,9 @@ export function ShowsMapOverlay({ width, height }: ShowsMapOverlayProps) {
 
   useEffect(() => {
     checkFeatureFlag();
+  }, []);
+
+  useEffect(() => {
     if (enabled) {
       fetchShows();
       const interval = setInterval(fetchShows, POLLING_INTERVAL_MS);
@@ -40,10 +43,25 @@ export function ShowsMapOverlay({ width, height }: ShowsMapOverlayProps) {
 
   const checkFeatureFlag = async () => {
     try {
-      const response = await fetch("/api/admin/feature-flags");
+      const now = Date.now();
+      const cachedFlag = sessionStorage.getItem('shows_map_flag');
+      const cachedFlagTime = sessionStorage.getItem('shows_map_flag_time');
+      
+      // Use 5-minute cache
+      if (cachedFlag && cachedFlagTime && (now - parseInt(cachedFlagTime)) < 300000) {
+        setEnabled(cachedFlag === 'true');
+        return;
+      }
+      
+      // Fetch from cached API
+      const response = await fetch("/api/feature-flags-cached");
       const result = await response.json();
       const flag = result.data?.find((f: any) => f.flag_name === "shows_map_enabled");
-      setEnabled(flag?.enabled || false);
+      const isEnabled = flag?.enabled || false;
+      
+      setEnabled(isEnabled);
+      sessionStorage.setItem('shows_map_flag', String(isEnabled));
+      sessionStorage.setItem('shows_map_flag_time', String(now));
     } catch (error) {
       console.error("Error checking shows_map_enabled flag:", error);
     }

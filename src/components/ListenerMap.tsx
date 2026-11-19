@@ -40,7 +40,7 @@ interface ListenerMapProps {
 
 const COLS = LAND_ROWS[0].length;
 const ROWS = LAND_ROWS.length;
-const REFRESH_MS = 120000; // Changed from 30000 (30s) to 120000 (2min) - saves 75% of requests
+const REFRESH_MS = 120000; // 2 minutes
 
 const project = (lat: number, lon: number) => ({
   x: (lon + 180) / DOT_STEP,
@@ -67,45 +67,45 @@ export function ListenerMap({ nowPlaying }: ListenerMapProps) {
   const [lastSubmit, setLastSubmit] = useState<number>(0);
   const [cooldown, setCooldown] = useState<number>(0);
   const [supabase] = useState(() => createClient());
-  const [sessionReady, setSessionReady] = useState(false); // Track if session is initialized
+  const [sessionReady, setSessionReady] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
 
-  // Fetch mood categories for legend/buttons - with caching
+  // ONE-TIME fetch of mood config on mount - cached in sessionStorage only
   useEffect(() => {
-    const fetchMoods = async () => {
+    const fetchMoodConfig = async () => {
       try {
-        // Check feature flag with client-side cache
-        const cachedFlag = sessionStorage.getItem('mood_flag_cache');
-        const cachedTime = sessionStorage.getItem('mood_flag_cache_time');
         const now = Date.now();
+        
+        // Check sessionStorage cache first (5 min TTL)
+        const cachedFlag = sessionStorage.getItem('mood_flag_cache');
+        const cachedFlagTime = sessionStorage.getItem('mood_flag_cache_time');
+        const cachedMoods = sessionStorage.getItem('mood_categories_cache');
+        const cachedMoodsTime = sessionStorage.getItem('mood_categories_cache_time');
         
         let isEnabled = false;
         
-        if (cachedFlag && cachedTime && (now - parseInt(cachedTime)) < 300000) {
-          // Use 5-minute cache
+        // Use cached flag if fresh
+        if (cachedFlag && cachedFlagTime && (now - parseInt(cachedFlagTime)) < 300000) {
           isEnabled = cachedFlag === 'true';
         } else {
-          const flagResponse = await fetch("/api/admin/feature-flags");
+          // Use cached API endpoint
+          const flagResponse = await fetch("/api/feature-flags-cached");
           const flagData = await flagResponse.json();
           const moodFlag = flagData.data?.find((f: any) => f.flag_name === "mood_tracker_enabled");
           isEnabled = moodFlag?.enabled === true;
           
-          // Cache the result
           sessionStorage.setItem('mood_flag_cache', String(isEnabled));
           sessionStorage.setItem('mood_flag_cache_time', String(now));
         }
         
         setMoodEnabled(isEnabled);
 
+        // If enabled, fetch mood categories from cache or API
         if (isEnabled) {
-          // Fetch mood categories with cache
-          const cachedMoods = sessionStorage.getItem('mood_categories_cache');
-          const cachedMoodsTime = sessionStorage.getItem('mood_categories_cache_time');
-          
           if (cachedMoods && cachedMoodsTime && (now - parseInt(cachedMoodsTime)) < 300000) {
-            // Use 5-minute cache
             setMoods(JSON.parse(cachedMoods));
           } else {
+            // Fetch from Supabase only once and cache
             const { data: moodData } = await supabase
               .from("mood_categories")
               .select("id, category_name, emoji, label, color_hsl, quadrant_position")
@@ -120,12 +120,12 @@ export function ListenerMap({ nowPlaying }: ListenerMapProps) {
           }
         }
       } catch (error) {
-        console.error("Failed to fetch mood categories:", error);
+        console.error("Failed to fetch mood config:", error);
       }
     };
 
-    fetchMoods();
-  }, [supabase]);
+    fetchMoodConfig();
+  }, []); // Empty deps - only run once on mount
 
   // Cooldown timer
   useEffect(() => {

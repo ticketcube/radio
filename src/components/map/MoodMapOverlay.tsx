@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { CityMoodDot } from "./CityMoodDot";
 import { findCity } from "@/lib/cities";
-import { supabase } from "@/integrations/supabase/client";
 
 interface MoodCity {
   city: string;
@@ -39,27 +38,55 @@ export function MoodMapOverlay({ width, height, cities }: MoodMapOverlayProps) {
   useEffect(() => {
     const init = async () => {
       try {
-        // Check feature flag
-        const response = await fetch("/api/admin/feature-flags");
-        const result = await response.json();
-        const flag = result.data?.find((f: any) => f.flag_name === "mood_tracker_enabled");
-        const isEnabled = flag?.enabled || false;
+        const now = Date.now();
+        
+        // Check sessionStorage cache first
+        const cachedFlag = sessionStorage.getItem('mood_overlay_flag');
+        const cachedFlagTime = sessionStorage.getItem('mood_overlay_flag_time');
+        const cachedColors = sessionStorage.getItem('mood_colors_cache');
+        const cachedColorsTime = sessionStorage.getItem('mood_colors_cache_time');
+        
+        let isEnabled = false;
+        
+        // Use cached flag if fresh (5 min)
+        if (cachedFlag && cachedFlagTime && (now - parseInt(cachedFlagTime)) < 300000) {
+          isEnabled = cachedFlag === 'true';
+        } else {
+          // Use cached API endpoint
+          const response = await fetch("/api/feature-flags-cached");
+          const result = await response.json();
+          const flag = result.data?.find((f: any) => f.flag_name === "mood_tracker_enabled");
+          isEnabled = flag?.enabled || false;
+          
+          sessionStorage.setItem('mood_overlay_flag', String(isEnabled));
+          sessionStorage.setItem('mood_overlay_flag_time', String(now));
+        }
+        
         setEnabled(isEnabled);
 
-        // Fetch mood colors from database
+        // Fetch mood colors if enabled
         if (isEnabled) {
-          const { data: moodData } = await supabase
-            .from("mood_categories")
-            .select("category_name, color_hsl")
-            .eq("enabled", true);
+          if (cachedColors && cachedColorsTime && (now - parseInt(cachedColorsTime)) < 300000) {
+            setMoodColors(JSON.parse(cachedColors));
+          } else {
+            // Fetch once from Supabase
+            const { createClient } = await import("@/integrations/supabase/client");
+            const supabase = createClient();
+            
+            const { data: moodData } = await supabase
+              .from("mood_categories")
+              .select("category_name, color_hsl")
+              .eq("enabled", true);
 
-          if (moodData) {
-            const colors: Record<string, string> = {};
-            moodData.forEach(m => {
-              colors[m.category_name] = `hsl(${m.color_hsl})`;
-            });
-            setMoodColors(colors);
-            console.log("[MoodMapOverlay] Loaded mood colors:", colors);
+            if (moodData) {
+              const colors: Record<string, string> = {};
+              moodData.forEach(m => {
+                colors[m.category_name] = `hsl(${m.color_hsl})`;
+              });
+              setMoodColors(colors);
+              sessionStorage.setItem('mood_colors_cache', JSON.stringify(colors));
+              sessionStorage.setItem('mood_colors_cache_time', String(now));
+            }
           }
         }
       } catch (error) {
@@ -69,7 +96,7 @@ export function MoodMapOverlay({ width, height, cities }: MoodMapOverlayProps) {
     };
 
     init();
-  }, []);
+  }, []); // Empty deps - only run once
 
   useEffect(() => {
     if (!enabled) return;
