@@ -106,7 +106,8 @@ export function MoodMapOverlay({ width, height, cities }: MoodMapOverlayProps) {
     };
 
     fetchCityMoods();
-    const interval = setInterval(fetchCityMoods, 5000);
+    // Changed from 5000 (5s) to 120000 (2min) to match other component polling intervals
+    const interval = setInterval(fetchCityMoods, 120000);
     return () => clearInterval(interval);
   }, [enabled, cityMoods]);
 

@@ -1,12 +1,22 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createClient } from "@/integrations/supabase/client";
 
+// In-memory cache to reduce Supabase query load
+let cache: { data: any; timestamp: number } | null = null;
+const CACHE_TTL = 60000; // 1 minute cache
+
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
 ) {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  // Return cached data if fresh
+  if (cache && Date.now() - cache.timestamp < CACHE_TTL) {
+    res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=120");
+    return res.status(200).json(cache.data);
   }
 
   const supabase = createClient();
@@ -17,7 +27,7 @@ export default async function handler(
       .from("mood_changes")
       .select("city, mood_category, created_at")
       .not("city", "is", null)
-      .neq("city", "Local") // Still filter out Local
+      .neq("city", "Local")
       .gte("created_at", new Date(Date.now() - 5 * 60 * 1000).toISOString())
       .order("created_at", { ascending: false });
 
@@ -40,18 +50,18 @@ export default async function handler(
       }
     });
 
-    const result = Array.from(cityMap.values());
-    console.log(`[city-aggregates] Returning ${result.length} unique cities with moods`);
-    
-    // Log each city for debugging
-    result.forEach(r => {
-      console.log(`  - ${r.city}: ${r.mood}`);
-    });
-
-    return res.status(200).json({ 
-      cities: result,
+    const result = {
+      cities: Array.from(cityMap.values()),
       total_changes: data?.length || 0
-    });
+    };
+
+    console.log(`[city-aggregates] Returning ${result.cities.length} unique cities with moods`);
+    
+    // Cache the result
+    cache = { data: result, timestamp: Date.now() };
+
+    res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=120");
+    return res.status(200).json(result);
   } catch (err) {
     console.error("[city-aggregates] Unexpected error:", err);
     return res.status(500).json({ error: "Internal server error" });

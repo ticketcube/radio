@@ -21,6 +21,8 @@ interface ShowsMapOverlayProps {
   height: number;
 }
 
+const POLLING_INTERVAL_MS = 120000; // 2 minutes to match other components
+
 export function ShowsMapOverlay({ width, height }: ShowsMapOverlayProps) {
   const [enabled, setEnabled] = useState(false);
   const [shows, setShows] = useState<Show[]>([]);
@@ -31,6 +33,8 @@ export function ShowsMapOverlay({ width, height }: ShowsMapOverlayProps) {
     checkFeatureFlag();
     if (enabled) {
       fetchShows();
+      const interval = setInterval(fetchShows, POLLING_INTERVAL_MS);
+      return () => clearInterval(interval);
     }
   }, [enabled]);
 
