@@ -7,23 +7,37 @@
 ## 📋 Project Context
 
 **What is OTW Radio?**
-A 24/7 internet radio station for Ones To Watch. DJs stream live via AzuraCast Web DJ interface. The web player shows now-playing info, programming schedule, and admin tools for managing DJs and playlists.
+A 24/7 internet radio station for Ones To Watch. DJs stream live via AzuraCast Web DJ interface. The web player shows now-playing info, programming schedule, mood tracking, listener analytics, and admin tools for managing DJs, playlists, and media extraction.
 
-**Current State (as of 2026-11-04):**
+**Current State (as of 2026-11-20):**
 - ✅ Phase 1: Static schedule, audio player, admin panel
 - ✅ Phase 2: DJ management with AzuraCast live status integration
-- 🔄 Phase 3: AIMC playlist automation (in progress)
-- 📋 Phase 4: Listener features (planned)
+- ✅ Phase 3: AIMC playlist automation (operational)
+- ✅ Phase 4: Listener features (mood tracking, listener map)
+- 🔄 Phase 5: Performance optimization & scaling
 
 ---
 
 ## 🏗️ Architecture Overview
 
+### Infrastructure Split
+
+**Production Architecture:**
+- **Web Application:** `onestowatch.live` → Vercel (Next.js)
+- **Radio Server:** `radio.onestowatch.live` → Linode (AzuraCast Docker)
+- **Worker Service:** Separate Linode instance (AIMC audio extraction)
+
+**Why Split?**
+- Vercel: Optimal for Next.js deployment, edge caching, global CDN
+- Linode: Dedicated resources for audio streaming, AzuraCast requires Docker
+- Worker: Heavy ffmpeg processing isolated from web traffic
+
 ### Tech Stack
 - **Frontend:** Next.js 15.2 (Page Router), React 18, TypeScript, Tailwind + shadcn/ui
-- **Backend:** Supabase (Postgres + Auth + Storage + RLS)
+- **Backend:** Supabase Cloud (Postgres + Auth + Storage + RLS)
 - **Streaming:** AzuraCast (station management, Web DJ interface, live detection)
-- **Deployment:** Vercel (web app) + Linode (optional self-hosted)
+- **Media Warehouse:** AIMC (AWS Media Lake) - video/audio asset storage
+- **Deployment:** Vercel (web) + Linode (radio + worker)
 
 ### Key Design Decisions
 
@@ -41,10 +55,19 @@ A 24/7 internet radio station for Ones To Watch. DJs stream live via AzuraCast W
 - Auth: Supabase Auth (no custom JWT, no bcrypt)
 - Database: Postgres with RLS policies (no service role key in client code)
 - Files: Supabase Storage (no local filesystem)
+- **Cloud Hosted:** Using Supabase hosted service, not self-hosted
 
 **4. Server-Side API Key Management**
 - `AZURACAST_API_KEY` must stay server-side (Next.js API routes only)
-- Client uses public endpoints (`/api/nowplaying`) or our proxy APIs (`/api/admin/live-djs`)
+- `AIMC_API_KEY` must stay server-side
+- Client uses public endpoints or our proxy APIs
+
+**5. Performance Optimization**
+- Polling intervals: 2 minutes (was 30 seconds - 75% reduction)
+- In-memory caching: Feature flags, analytics (5 minute TTL)
+- CDN cache headers: 2 minute cache, 4 minute stale-while-revalidate
+- Lazy anonymous auth: Only on user interaction, not page load
+- Rate limiting: 15 second cooldown on mood submissions
 
 ---
 
@@ -60,8 +83,42 @@ username TEXT NOT NULL
 display_name TEXT
 role TEXT CHECK (role IN ('admin', 'otwl-dj', 'listener', 'verified-listener'))
 is_admin BOOLEAN DEFAULT false
-azuracast_streamer_username TEXT  -- Exact match to AzuraCast username
-azuracast_notes TEXT              -- Admin notes about DJ setup/schedule
+azuracast_streamer_username TEXT
+azuracast_notes TEXT
+created_at TIMESTAMPTZ
+```
+
+**mood_changes** (listener mood tracking)
+```sql
+id BIGSERIAL PRIMARY KEY
+user_id UUID REFERENCES auth.users(id)
+city TEXT
+mood_value INTEGER (0-100)
+mood_category TEXT (cozy, party, reflection, focus)
+song_title TEXT
+song_artist TEXT
+song_id TEXT
+created_at TIMESTAMPTZ
+```
+
+**extraction_jobs** (AIMC audio extraction pipeline)
+```sql
+id UUID PRIMARY KEY
+asset_id TEXT NOT NULL
+asset_name TEXT
+artist TEXT
+title TEXT NOT NULL
+status TEXT (pending, claimed, downloading, converting, uploading, done, failed)
+claimed_at TIMESTAMPTZ
+claimed_by TEXT
+save_to_aimc BOOLEAN
+save_to_radio BOOLEAN
+download_url TEXT
+aimc_key TEXT
+radio_path TEXT
+duration_sec NUMERIC
+size_bytes BIGINT
+error TEXT
 created_at TIMESTAMPTZ
 ```
 
@@ -69,15 +126,8 @@ created_at TIMESTAMPTZ
 - Users can SELECT their own profile
 - Admins can SELECT/UPDATE/DELETE all profiles
 - Anyone can INSERT (for signup), but trigger sets role='listener' default
-
-**playlists** (tracks, episodes, schedule items)
-```sql
-id BIGSERIAL PRIMARY KEY
-name TEXT NOT NULL
-type TEXT (track, episode, recurring)
-metadata JSONB (artist, title, duration, aimc_asset_id, has_video, etc.)
-created_at TIMESTAMPTZ
-```
+- Mood tracking requires authenticated session
+- Extraction jobs admin-only
 
 ---
 
@@ -86,7 +136,7 @@ created_at TIMESTAMPTZ
 ### Station Configuration
 - **Station ID:** `2`
 - **Shortcode:** `otw_radio`
-- **Base URL:** `https://radio.onestowatch.live`
+- **Base URL:** `https://radio.onestowatch.live` (Linode server)
 
 ### API Endpoints
 
@@ -102,6 +152,7 @@ GET /api/station/otw_radio/streamers
 GET /api/station/otw_radio/playlists
 POST /api/station/otw_radio/playlists
 PUT /api/station/otw_radio/playlist/{id}
+GET /api/station/otw_radio/listeners
 ```
 
 ### DJ Matching Logic
@@ -117,34 +168,173 @@ PUT /api/station/otw_radio/playlist/{id}
 
 **Common Pitfall:** Using `display_name` or `email` for matching - these don't exist in AzuraCast's streamer response. Only `streamer_username` is reliable.
 
-### API Route Pattern
+---
 
-```typescript
-// src/pages/api/admin/live-djs.ts
-const AZURACAST_API_KEY = process.env.AZURACAST_API_KEY; // Server-side only
-const STATION_SHORTCODE = "otw_radio";
+## 🎬 AIMC Integration
 
-// Fetch live status (public)
-const nowPlaying = await fetch(
-  `${AZURACAST_BASE_URL}/api/nowplaying/${STATION_SHORTCODE}`
-);
+### Status: **Operational** ✅
 
-// Fetch all streamers (authenticated)
-const streamers = await fetch(
-  `${AZURACAST_BASE_URL}/api/station/${STATION_SHORTCODE}/streamers`,
-  { headers: { "X-API-Key": AZURACAST_API_KEY } }
-);
+AIMC (AWS Media Lake) stores OTW's video and audio content. The integration extracts audio from video assets and uploads to both AIMC storage and the radio server for broadcasting.
 
-// Match to database
-const djStatuses = dbDJs.map(dj => {
-  const azuracastAccount = streamers.find(
-    s => s.streamer_username === dj.azuracast_streamer_username
-  );
-  const isLive = nowPlaying.live.is_live && 
-                 nowPlaying.live.streamer_name === dj.azuracast_streamer_username;
-  // ...
-});
+### Architecture
+
 ```
+AIMC (AWS Media Lake)
+  ↓ [Download URL]
+Worker Service (Linode)
+  ↓ [ffmpeg extraction + normalization]
+  ↓ [MP3 output]
+  ├→ Supabase Storage (AIMC bucket)
+  └→ Radio Server (SFTP to AzuraCast)
+```
+
+### Key Components
+
+**1. Web UI:** `/admin/extract-audio`
+- Select AIMC asset by ID
+- Preview metadata, thumbnail, duration
+- Choose destinations: AIMC storage, Radio server, or both
+- Monitor job status in real-time
+
+**2. Worker Service:** `worker/src/index.ts`
+- Polls `/api/worker/claim` every 10 seconds
+- Downloads video from AIMC presigned URL
+- Extracts audio with ffmpeg:
+  - Audio-only stream
+  - Loudness normalization
+  - 192kbps MP3
+  - Metadata tags (artist, title)
+- Uploads to selected destinations
+- Updates job status in database
+
+**3. API Routes:**
+- `/api/aimc/asset` - Fetch asset metadata from AIMC
+- `/api/aimc/generate-download` - Get presigned download URL
+- `/api/aimc/generate-upload` - Get presigned upload URL for Supabase
+- `/api/worker/claim` - Worker claims next pending job
+- `/api/worker/jobs/[id]` - Worker updates job status
+- `/api/extraction/create` - Admin creates new extraction job
+- `/api/extraction/jobs` - List all extraction jobs
+
+### AIMC Asset Structure
+
+```json
+{
+  "id": "asset:uuid:...",
+  "type": "Video",
+  "tags": {
+    "Artist": "Wilderado",
+    "Series": "Live From the Rooftop",
+    "Format": "Live Performance",
+    "Artist Spotify ID": "1Tp7C6LzxZe9Mix6rn4zbI"
+  },
+  "media": {
+    "durationSec": 217.6,
+    "width": 1920,
+    "height": 1080
+  },
+  "representations": [
+    { "purpose": "proxy", "format": "MP4" },
+    { "purpose": "thumbnail", "format": "JPEG" }
+  ]
+}
+```
+
+### Environment Variables
+
+```bash
+# AIMC (server-side only)
+AIMC_API_URL=https://otw.aimc-ln.com/v1
+AIMC_API_KEY=your-api-key
+
+# Worker (worker instance only)
+WORKER_TOKEN=secure-random-token
+SFTP_HOST=radio.onestowatch.live
+SFTP_PORT=2022
+SFTP_USER=azuracast
+SFTP_PRIVATE_KEY_PATH=/path/to/key
+RADIO_FOLDER=aimc
+```
+
+### Common Issues
+
+**Issue:** Worker fails with "No audio track"
+**Solution:** Some videos are video-only. Check AIMC for audio codec in metadata.
+
+**Issue:** SFTP upload fails
+**Solution:** Verify SSH key permissions (600), AzuraCast SFTP user has write access.
+
+**Issue:** Job stuck in "downloading"
+**Solution:** Check worker logs, may be large file or slow AIMC response.
+
+---
+
+## 🌍 Listener Analytics & Mood Tracking
+
+### Listener Map
+
+**Endpoint:** `/api/listeners-map`
+- Fetches AzuraCast listener report (requires API key)
+- Aggregates by ~1 degree lat/lon buckets
+- Returns city names when ≥1 listeners in same location
+- **Polling:** 2 minutes (client), 2 minute server cache
+- **Privacy:** No IPs, user agents, or exact coordinates exposed
+
+**Data Usage Optimization:**
+- Before: 30 second polling = 120 requests/hour per visitor
+- After: 2 minute polling = 30 requests/hour per visitor
+- **Result:** 75% reduction in API calls
+
+### Mood Tracking
+
+**Endpoint:** `/api/mood/submit`
+- Anonymous auth (lazy - only on first interaction)
+- Rate limit: 15 seconds between submissions
+- Geolocation: IP-based city lookup (ip-api.com)
+- Categories: cozy (0-25), party (76-100), reflection (0-25), focus (51-75)
+
+**Data Usage Optimization:**
+- Before: Anonymous session created for ALL page visitors
+- After: Session created only when user taps a mood
+- **Result:** 95% reduction in unnecessary auth sessions
+
+**Feature Flag:** `mood_tracker_enabled`
+- Cached client-side for 5 minutes
+- Server checks on every submission
+- Admin can disable feature instantly
+
+---
+
+## 🎯 Planned Integrations
+
+### MCP (Model Context Protocol) + Ticketmaster
+
+**Status:** Planning phase
+
+**Concept:**
+- MCP agent connects to Ticketmaster API
+- Fetches upcoming concerts for OTW artists
+- Cross-references with artist roster in database
+- Auto-generates show announcements during relevant tracks
+- DJ dashboard shows "X playing in Y city this weekend"
+
+**Technical Requirements:**
+- Ticketmaster API key with artist/event access
+- MCP server implementation (separate service)
+- Artist Spotify ID → Ticketmaster Artist ID mapping
+- Real-time event data caching (24 hour TTL)
+
+**Benefits:**
+- Automated concert promotion during relevant airtime
+- Strengthens artist-to-listener connection
+- Drives ticket sales for OTW roster
+
+**Next Steps:**
+1. Acquire Ticketmaster API credentials
+2. Build artist ID mapping table
+3. Implement MCP server with Ticketmaster connector
+4. Design DJ dashboard widgets
+5. Test announcement timing logic
 
 ---
 
@@ -152,33 +342,28 @@ const djStatuses = dbDJs.map(dj => {
 
 ### Color Tokens (globals.css :root)
 ```css
---background: 0 0% 4%;          /* #0A0A0A near-black */
---foreground: 0 0% 98%;         /* #FAFAFA white */
---primary: 348 100% 54%;        /* #ED1D42 crimson */
---accent: 0 0% 12%;             /* #1F1F1F dark grey */
---muted: 0 0% 60%;              /* Grey for secondary text */
+--background: 0 0% 4%;
+--foreground: 0 0% 98%;
+--primary: 348 100% 54%;
+--accent: 0 0% 12%;
+--muted: 0 0% 60%;
 --border: 0 0% 12%;
 ```
 
 ### Typography
 ```typescript
 fontFamily: {
-  sans: ['IBM Plex Sans', ...],    // Body text
-  display: ['Sora', ...],          // Headings
-  mono: ['IBM Plex Mono', ...]     // Data, time, code
+  sans: ['IBM Plex Sans', ...],
+  display: ['Sora', ...],
+  mono: ['IBM Plex Mono', ...]
 }
 ```
 
 ### Key Animations
 ```css
-.animate-pulse-glow  /* Live indicators, glowing red */
-.animate-pulse-dot   /* Red dot on DJ cards */
+.animate-pulse-glow
+.animate-pulse-dot
 ```
-
-### Component Patterns
-- **Live indicator:** `<Radio />` icon + pulsing red dot + "LIVE" badge
-- **Time display:** IBM Plex Mono with `tabular-nums`
-- **Cards:** `bg-card` with `border-border`, hover effect with `glow-primary`
 
 ---
 
@@ -191,7 +376,6 @@ import { ProtectedRoute } from "@/components/ProtectedRoute";
 export default function AdminPage() {
   return (
     <ProtectedRoute requireAdmin>
-      {/* Admin-only content */}
     </ProtectedRoute>
   );
 }
@@ -199,11 +383,9 @@ export default function AdminPage() {
 
 ### Auth Checks
 ```typescript
-// Client-side
 const { user, profile, loading } = useAuth();
-if (profile?.is_admin) { /* admin UI */ }
+if (profile?.is_admin) { }
 
-// Server-side API route
 const { data: { user } } = await supabase.auth.getUser();
 const { data: profile } = await supabase
   .from("user_profiles")
@@ -216,71 +398,49 @@ if (!profile?.is_admin) {
 }
 ```
 
-### RLS Policy Pattern
-```sql
--- Admins can read/write all
-CREATE POLICY "admin_all" ON table_name
-FOR ALL USING (
-  EXISTS (
-    SELECT 1 FROM user_profiles
-    WHERE user_id = auth.uid() AND is_admin = true
-  )
-);
-
--- Users can read their own
-CREATE POLICY "select_own" ON table_name
-FOR SELECT USING (user_id = auth.uid());
-```
-
 ---
 
 ## 📡 API Route Patterns
 
-### Supabase Client Pattern (Client-Side)
+### Performance: Caching Strategy
+
+**Client-Side Caching (Session Storage):**
 ```typescript
-import { supabase } from "@/integrations/supabase/client";
+const cachedData = sessionStorage.getItem('cache_key');
+const cachedTime = sessionStorage.getItem('cache_key_time');
+const CACHE_TTL = 300000;
 
-// Query with RLS
-const { data, error } = await supabase
-  .from("user_profiles")
-  .select("*")
-  .eq("role", "otwl-dj")
-  .order("display_name", { ascending: true });
-```
-
-### Service Role Pattern (Server-Side API Routes)
-```typescript
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!, // Bypasses RLS
-  { auth: { persistSession: false } }
-);
-
-// Use only when RLS bypass is required (user creation, admin operations)
-const { data, error } = await supabaseAdmin
-  .from("user_profiles")
-  .insert({ ... });
-```
-
-### AzuraCast Proxy Pattern
-```typescript
-// NEVER expose AZURACAST_API_KEY to client
-// Use Next.js API route as proxy
-
-export default async function handler(req, res) {
-  const response = await fetch(
-    `${AZURACAST_BASE_URL}/api/station/${STATION_SHORTCODE}/streamers`,
-    {
-      headers: {
-        "X-API-Key": process.env.AZURACAST_API_KEY
-      }
-    }
-  );
-  const data = await response.json();
-  return res.json(data);
+if (cachedData && (Date.now() - parseInt(cachedTime)) < CACHE_TTL) {
+  return JSON.parse(cachedData);
 }
+```
+
+**Server-Side Caching (In-Memory):**
+```typescript
+let cache: { data: any; timestamp: number } | null = null;
+const CACHE_TTL = 60000;
+
+if (cache && Date.now() - cache.timestamp < CACHE_TTL) {
+  return res.json(cache.data);
+}
+```
+
+**CDN Caching (Headers):**
+```typescript
+res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=240");
+```
+
+### Lazy Anonymous Auth Pattern
+```typescript
+const [sessionReady, setSessionReady] = useState(false);
+
+const handleInteraction = async () => {
+  if (!sessionReady) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) await supabase.auth.signInAnonymously();
+    setSessionReady(true);
+  }
+};
 ```
 
 ---
@@ -289,8 +449,6 @@ export default async function handler(req, res) {
 
 ### Adding a New DJ
 ```typescript
-// 1. Create auth user (Supabase dashboard or API)
-// 2. Insert profile
 await supabase.from("user_profiles").insert({
   user_id: authUser.id,
   email: "dj@example.com",
@@ -299,43 +457,26 @@ await supabase.from("user_profiles").insert({
   role: "otwl-dj",
   is_admin: false
 });
-
-// 3. Create AzuraCast streamer account (AzuraCast Admin Panel)
-// 4. Set azuracast_streamer_username in /admin/djs page
 ```
 
-### Adding a Schedule Block
-```json
-// config/schedule.json
-{
-  "blocks": [
-    {
-      "id": "new_block",
-      "name": "New Block Name",
-      "time": "2:00 PM - 6:00 PM",
-      "description": "...",
-      "playlist": "azuracast_playlist_name",
-      "genres": ["genre1", "genre2"]
-    }
-  ]
-}
-```
-
-### Creating a Playlist
+### Creating an Extraction Job
 ```typescript
-// Use otw-radio/sync/ CLI tool or API route
-import { azuracast } from "./azuracast";
+1. Get AIMC asset ID from AIMC dashboard
+2. Go to /admin/extract-audio
+3. Enter asset ID, preview metadata
+4. Select destinations (AIMC storage and/or Radio)
+5. Submit - worker will process automatically
+6. Monitor status in job list
+```
 
-await azuracast.createPlaylist({
-  name: "Playlist Name",
-  type: "default",
-  source: "songs",
-  order: "shuffle",
-  is_enabled: true,
-  schedule_items: [
-    { start_time: 0, end_time: 0, days: [1,2,3,4,5] }
-  ]
-});
+### Deploying Worker
+```bash
+cd /opt/otw-worker
+git pull
+npm install
+docker-compose build
+docker-compose up -d
+docker-compose logs -f worker
 ```
 
 ---
@@ -345,35 +486,30 @@ await azuracast.createPlaylist({
 ### Issue: "duplicate key value violates unique constraint user_profiles_user_id_key"
 **Cause:** Trying to insert a profile for a user_id that already exists  
 **Solution:** Use UPSERT or check existence first
-```typescript
-const { data: existing } = await supabase
-  .from("user_profiles")
-  .select("user_id")
-  .eq("user_id", userId)
-  .single();
-
-if (!existing) {
-  await supabase.from("user_profiles").insert({ ... });
-}
-```
 
 ### Issue: DJ shows "Setup Required" even with AzuraCast account
 **Cause:** `azuracast_streamer_username` doesn't match AzuraCast's `streamer_username`  
-**Solution:** 
-1. Check AzuraCast Admin → Users & Accounts → Streamers
-2. Copy exact `streamer_username` value
-3. Paste into "Manage Credentials" dialog in `/admin/djs`
+**Solution:** Copy exact username from AzuraCast → Paste in /admin/djs
 
-### Issue: Unmatched live streamer alert
-**Cause:** Someone is streaming but their AzuraCast username isn't in our database  
-**Solution:** Either add their username to an existing DJ profile, or create a new DJ profile
+### Issue: Mood tracking not working
+**Cause:** Feature flag disabled OR rate limit hit  
+**Solution:** Check `/admin/features` for `mood_tracker_enabled` flag. Rate limit is 15 seconds.
 
-### Issue: Permission denied in API route
-**Cause:** RLS blocking query, or missing auth token  
+### Issue: Listener map shows "unconfigured"
+**Cause:** `AZURACAST_API_KEY` not set in environment  
+**Solution:** Add key to Vercel environment variables
+
+### Issue: Worker job stuck in "pending"
+**Cause:** Worker service not running OR not polling  
+**Solution:** Check `docker-compose logs -f worker`, verify WORKER_TOKEN matches
+
+### Issue: High Supabase usage
+**Cause:** Excessive polling or missing caching  
 **Solution:** 
-- Client queries: ensure user is logged in and has correct role
-- Server queries: use service role client if RLS bypass needed
-- Check RLS policies match the access pattern
+- Verify polling intervals (should be 2 minutes)
+- Check cache TTLs (feature flags: 5 min, analytics: 1 min)
+- Monitor lazy auth (no auth on page load)
+- Review `docs/SUPABASE_OPTIMIZATION.md`
 
 ---
 
@@ -387,21 +523,12 @@ if (!existing) {
 
 ### Import Order
 ```typescript
-// 1. External
 import { useState } from "react";
 import Link from "next/link";
-
-// 2. UI components
 import { Button } from "@/components/ui/button";
-
-// 3. Local components
 import { AudioPlayer } from "@/components/AudioPlayer";
-
-// 4. Services/utils
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
-
-// 5. Types
 import type { DJ, DJStatus } from "@/types";
 ```
 
@@ -413,45 +540,51 @@ try {
   return data;
 } catch (err) {
   console.error("Context-specific error message:", err);
-  // Show user-friendly message
-  setError("Failed to load data. Please try again.");
+  setError("User-friendly message");
 }
 ```
-
-### TypeScript
-- Always define interfaces for API responses
-- Use `type` for unions, `interface` for objects
-- Prefer explicit return types on functions
-- No `any` - use `unknown` and narrow with guards
 
 ---
 
 ## 🚀 Deployment Checklist
 
-### Environment Variables
-- [ ] All `NEXT_PUBLIC_*` vars set in Vercel
-- [ ] `SUPABASE_SERVICE_ROLE_KEY` set (server-only)
-- [ ] `AZURACAST_API_KEY` set (server-only)
-- [ ] Database connection strings configured
+### Environment Variables (Vercel)
+- [ ] `NEXT_PUBLIC_SUPABASE_URL`
+- [ ] `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- [ ] `SUPABASE_SERVICE_ROLE_KEY` (server-only)
+- [ ] `AZURACAST_API_KEY` (server-only)
+- [ ] `AZURACAST_URL` (server-only)
+- [ ] `NEXT_PUBLIC_AZURACAST_URL` (public stream URL)
+- [ ] `AIMC_API_URL` (server-only)
+- [ ] `AIMC_API_KEY` (server-only)
+- [ ] `WORKER_TOKEN` (server-only)
+
+### Environment Variables (Worker)
+- [ ] `APP_URL` (points to Vercel app)
+- [ ] `WORKER_TOKEN` (matches Vercel)
+- [ ] `SFTP_HOST` (AzuraCast server)
+- [ ] `SFTP_PORT` (default: 2022)
+- [ ] `SFTP_USER` (default: azuracast)
+- [ ] `SFTP_PRIVATE_KEY_PATH`
+- [ ] `RADIO_FOLDER` (default: aimc)
 
 ### Database
 - [ ] Migrations applied
 - [ ] RLS policies enabled on all tables
 - [ ] Admin user created
-- [ ] Test DJ account created
+- [ ] Feature flags initialized
 
-### AzuraCast
-- [ ] Station configured with shortcode `otw_radio`
-- [ ] API key generated with station-level permissions
-- [ ] Test streamer account created
-- [ ] Web DJ interface accessible
+### Services
+- [ ] AzuraCast configured with shortcode `otw_radio`
+- [ ] AzuraCast API key generated
+- [ ] AIMC API key verified
+- [ ] Worker service deployed and running
 
-### Testing
-- [ ] Audio player works on all pages
-- [ ] Admin login successful
-- [ ] DJ management CRUD operations work
-- [ ] Live status detection working
-- [ ] Schedule renders correctly
+### Performance
+- [ ] Polling intervals set to 2 minutes
+- [ ] Caching enabled (session storage, server cache, CDN)
+- [ ] Lazy anonymous auth implemented
+- [ ] Rate limiting on mood submissions
 
 ---
 
@@ -462,17 +595,19 @@ When continuing work on this project:
 1. **Read this guide first** - understand architecture before coding
 2. **Check existing patterns** - match file structure, naming, API patterns
 3. **Verify schema** - run `get_database_schema` before database changes
-4. **Test AzuraCast integration** - don't break DJ matching logic
-5. **Preserve dark theme** - never add light mode, use existing design tokens
-6. **Follow RLS** - never bypass security unless explicitly needed
-7. **Document as you go** - update this guide if you add new patterns
+4. **Performance first** - avoid high-frequency polling, use caching
+5. **Test integrations** - don't break AIMC pipeline or DJ matching
+6. **Preserve dark theme** - never add light mode
+7. **Follow RLS** - never bypass security without justification
+8. **Document as you go** - update this guide if you add new patterns
 
 **Common Pitfalls to Avoid:**
-- ❌ Using `display_name` or `email` for DJ matching (use `streamer_username`)
-- ❌ Exposing `AZURACAST_API_KEY` to client (use API route proxy)
-- ❌ Bypassing RLS without justification (use service role client sparingly)
-- ❌ Adding light mode toggles (permanent dark theme)
-- ❌ Creating duplicate auth systems (Supabase Auth only)
+- ❌ Polling more frequently than 2 minutes (increases costs)
+- ❌ Creating anonymous sessions on page load (use lazy auth)
+- ❌ Bypassing server-side caching (causes duplicate Supabase queries)
+- ❌ Using `display_name` for DJ matching (use `streamer_username`)
+- ❌ Exposing API keys to client (use Next.js API routes)
+- ❌ Adding light mode (permanent dark theme)
 - ❌ Hardcoding URLs or credentials (use environment variables)
 
 ---
@@ -482,7 +617,10 @@ When continuing work on this project:
 - **Project Brief:** `.softgen/project.md`
 - **Roadmap:** `docs/SCALING_ROADMAP.md`
 - **AzuraCast Setup:** `docs/AZURACAST_SETUP.md`
-- **DJ Management Plan:** `public/DJ_MANAGEMENT_ROADMAP.md`
+- **AIMC Integration:** `otw-radio/docs/AIMC_INTEGRATION.md`
+- **Supabase Optimization:** `docs/SUPABASE_OPTIMIZATION.md`
+- **Listener Map Feature:** `docs/LISTENERMAP_FEATURE.md`
 - **Deployment Guide:** `docs/LINODE_DEPLOYMENT.md`
+- **Worker Deployment:** `docs/WORKER_DEPLOYMENT_GUIDE.md`
 
-For questions not covered here, check existing code patterns in `src/pages/admin/djs.tsx` and `src/pages/api/admin/live-djs.ts` - they demonstrate the full stack.
+For questions not covered here, check existing code patterns in relevant admin pages and API routes.
