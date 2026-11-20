@@ -252,7 +252,7 @@ export default function EmbedPlayer() {
                 </div>
 
                 {/* Schedule */}
-                <div className="mt-4"><ScheduleCard /></div>
+               
             </div>
         </div>
     );
