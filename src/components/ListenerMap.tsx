@@ -1,11 +1,17 @@
 import { useEffect, useState, memo, useRef } from "react";
 import { Headphones } from "lucide-react";
-import { toast } from "sonner";
 import { DOT_LAT_TOP, DOT_STEP, LAND_ROWS } from "@/lib/worldDots";
 import { MapOverlayManager } from "./map/MapOverlayManager";
-import { MoodMapOverlay } from "./map/MoodMapOverlay";
 import { ShowsMapOverlay } from "./map/ShowsMapOverlay";
-import { createClient } from "@/integrations/supabase/client";
+
+// CONFIGURATION - Easy to tweak
+const CONFIG = {
+  REFRESH_MS: 120000, // 2 minutes
+  AGGREGATE_WINDOW: 100, // Last N submissions
+  LAND_COLOR_SATURATION: 0.3, // 0-1, how vivid the land color is
+  FLASH_DURATION_MS: 500,
+  FADE_TO_AGGREGATE_MS: 2000,
+};
 
 interface ListenerSpot {
   lat: number;
@@ -21,33 +27,25 @@ interface ListenersData {
   source: "live" | "demo" | "unconfigured" | "error";
 }
 
-interface MoodCategory {
-  id: string;
-  category_name: string;
-  emoji: string;
-  label: string;
-  color_hsl: string;
-  quadrant_position: string | null;
-}
-
 interface ListenerMapProps {
-  nowPlaying?: {
-    title: string;
-    artist: string;
-    id?: string;
-  };
+  flashColor?: string | null; // HSL string for local flash
 }
 
 const COLS = LAND_ROWS[0].length;
 const ROWS = LAND_ROWS.length;
-const REFRESH_MS = 120000; // 2 minutes
 
 const project = (lat: number, lon: number) => ({
   x: (lon + 180) / DOT_STEP,
   y: (DOT_LAT_TOP - lat) / DOT_STEP + 0.5,
 });
 
-const LandDots = memo(function LandDots() {
+interface LandDotsProps {
+  color: string; // HSL color
+  isFlashing: boolean;
+  flashColor: string;
+}
+
+const LandDots = memo(function LandDots({ color, isFlashing, flashColor }: LandDotsProps) {
   const dots: JSX.Element[] = [];
   LAND_ROWS.forEach((row, y) => {
     for (let x = 0; x < row.length; x++) {
@@ -56,86 +54,30 @@ const LandDots = memo(function LandDots() {
       }
     }
   });
-  return <g className="fill-foreground/20">{dots}</g>;
+  
+  const displayColor = isFlashing ? flashColor : color;
+  
+  return (
+    <g 
+      className="transition-all"
+      style={{
+        fill: displayColor,
+        transitionDuration: isFlashing ? '0s' : `${CONFIG.FADE_TO_AGGREGATE_MS}ms`,
+        transitionProperty: 'fill'
+      }}
+    >
+      {dots}
+    </g>
+  );
 });
 
-export function ListenerMap({ nowPlaying }: ListenerMapProps) {
+export function ListenerMap({ flashColor }: ListenerMapProps) {
   const [data, setData] = useState<ListenersData | null>(null);
-  const [moods, setMoods] = useState<MoodCategory[]>([]);
-  const [moodEnabled, setMoodEnabled] = useState(false);
-  const [tappedEmoji, setTappedEmoji] = useState<string | null>(null);
-  const [lastSubmit, setLastSubmit] = useState<number>(0);
-  const [cooldown, setCooldown] = useState<number>(0);
-  const [supabase] = useState(() => createClient());
-  const [sessionReady, setSessionReady] = useState(false);
+  const [aggregateColor, setAggregateColor] = useState<string>("hsl(0 0% 20%)"); // Default gray
+  const [isFlashing, setIsFlashing] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
 
-  // ONE-TIME fetch of mood config on mount - cached in sessionStorage only
-  useEffect(() => {
-    const fetchMoodConfig = async () => {
-      try {
-        const now = Date.now();
-        
-        // Check sessionStorage cache first (5 min TTL)
-        const cachedFlag = sessionStorage.getItem('mood_flag_cache');
-        const cachedFlagTime = sessionStorage.getItem('mood_flag_cache_time');
-        const cachedMoods = sessionStorage.getItem('mood_categories_cache');
-        const cachedMoodsTime = sessionStorage.getItem('mood_categories_cache_time');
-        
-        let isEnabled = false;
-        
-        // Use cached flag if fresh
-        if (cachedFlag && cachedFlagTime && (now - parseInt(cachedFlagTime)) < 300000) {
-          isEnabled = cachedFlag === 'true';
-        } else {
-          // Use cached API endpoint
-          const flagResponse = await fetch("/api/feature-flags-cached");
-          const flagData = await flagResponse.json();
-          const moodFlag = flagData.data?.find((f: any) => f.flag_name === "mood_tracker_enabled");
-          isEnabled = moodFlag?.enabled === true;
-          
-          sessionStorage.setItem('mood_flag_cache', String(isEnabled));
-          sessionStorage.setItem('mood_flag_cache_time', String(now));
-        }
-        
-        setMoodEnabled(isEnabled);
-
-        // If enabled, fetch mood categories from cache or API
-        if (isEnabled) {
-          if (cachedMoods && cachedMoodsTime && (now - parseInt(cachedMoodsTime)) < 300000) {
-            setMoods(JSON.parse(cachedMoods));
-          } else {
-            // Fetch from Supabase only once and cache
-            const { data: moodData } = await supabase
-              .from("mood_categories")
-              .select("id, category_name, emoji, label, color_hsl, quadrant_position")
-              .eq("enabled", true)
-              .order("display_order");
-
-            if (moodData) {
-              setMoods(moodData);
-              sessionStorage.setItem('mood_categories_cache', JSON.stringify(moodData));
-              sessionStorage.setItem('mood_categories_cache_time', String(now));
-            }
-          }
-        }
-      } catch (error) {
-        console.error("Failed to fetch mood config:", error);
-      }
-    };
-
-    fetchMoodConfig();
-  }, []); // Empty deps - only run once on mount
-
-  // Cooldown timer
-  useEffect(() => {
-    if (cooldown > 0) {
-      const timer = setTimeout(() => setCooldown(cooldown - 1), 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [cooldown]);
-
-  // Fetch listeners data with 2-minute interval
+  // Fetch listeners data
   useEffect(() => {
     const fetchListeners = async () => {
       try {
@@ -155,157 +97,60 @@ export function ListenerMap({ nowPlaying }: ListenerMapProps) {
     };
 
     fetchListeners();
-    const interval = setInterval(fetchListeners, REFRESH_MS);
+    const interval = setInterval(fetchListeners, CONFIG.REFRESH_MS);
     return () => clearInterval(interval);
   }, []);
 
-  const handleMoodTap = async (mood: MoodCategory) => {
-    // Check client-side rate limit
-    const now = Date.now();
-    const timeSince = (now - lastSubmit) / 1000;
-    
-    if (timeSince < 15) {
-      const remaining = Math.ceil(15 - timeSince);
-      setCooldown(remaining);
-      toast.error(`Wait ${remaining}s before changing mood again`);
-      return;
-    }
-
-    // Visual feedback
-    setTappedEmoji(mood.emoji);
-    setTimeout(() => setTappedEmoji(null), 600);
-
-    try {
-      // LAZY ANONYMOUS AUTH - Only create session when user actually interacts
-      if (!sessionReady) {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) {
-          await supabase.auth.signInAnonymously();
+  // Fetch aggregate vibe color
+  useEffect(() => {
+    const fetchAggregate = async () => {
+      try {
+        const response = await fetch("/api/mood/city-aggregates");
+        if (response.ok) {
+          const result = await response.json();
+          
+          // Calculate aggregate color from last N submissions
+          if (result.aggregateColor) {
+            // Apply saturation multiplier for subtle effect
+            const hslMatch = result.aggregateColor.match(/hsl\((\d+)\s+(\d+)%\s+(\d+)%\)/);
+            if (hslMatch) {
+              const h = hslMatch[1];
+              const s = Math.round(parseInt(hslMatch[2]) * CONFIG.LAND_COLOR_SATURATION);
+              const l = hslMatch[3];
+              setAggregateColor(`hsl(${h} ${s}% ${l}%)`);
+            }
+          }
         }
-        setSessionReady(true);
+      } catch (error) {
+        console.error("Failed to fetch aggregate:", error);
       }
-      
-      // Get current session
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) {
-        throw new Error("No active session. Please refresh the page.");
-      }
+    };
 
-      // Check rate limit via database
-      const { data: recentMood } = await supabase
-        .from("mood_changes")
-        .select("created_at")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+    fetchAggregate();
+    const interval = setInterval(fetchAggregate, CONFIG.REFRESH_MS);
+    return () => clearInterval(interval);
+  }, []);
 
-      if (recentMood?.created_at) {
-        const lastSubmission = new Date(recentMood.created_at).getTime();
-        const timeSinceLastSubmission = (Date.now() - lastSubmission) / 1000;
-
-        if (timeSinceLastSubmission < 15) {
-          const remainingTime = Math.ceil(15 - timeSinceLastSubmission);
-          setCooldown(remainingTime);
-          toast.error(`Slow down! Wait ${remainingTime}s`);
-          return;
-        }
-      }
-
-      // Get city from IP
-      const cityResponse = await fetch("/api/mood/get-city");
-      const cityData = await cityResponse.json();
-      const city = cityData.city || "Unknown";
-
-      // Insert mood directly to Supabase
-      const { error: insertError } = await supabase
-        .from("mood_changes")
-        .insert({
-          user_id: user.id,
-          city,
-          mood_category: mood.category_name,
-          mood_value: 0,
-          song_title: nowPlaying?.title || "Unknown",
-          song_artist: nowPlaying?.artist || "Unknown",
-          song_id: nowPlaying?.id
-        });
-
-      if (insertError) {
-        throw insertError;
-      }
-
-      setLastSubmit(now);
-      toast.success(`${mood.emoji} ${mood.label}`, {
-        duration: 2000
-      });
-    } catch (err) {
-      console.error("Mood submission error:", err);
-      toast.error(err instanceof Error ? err.message : "Failed to update mood");
+  // Handle flash from parent
+  useEffect(() => {
+    if (flashColor) {
+      setIsFlashing(true);
+      const timer = setTimeout(() => setIsFlashing(false), CONFIG.FLASH_DURATION_MS);
+      return () => clearTimeout(timer);
     }
-  };
+  }, [flashColor]);
 
   const maxCount = Math.max(1, ...(data?.spots.map((s) => s.count) ?? [1]));
   const total = data?.total ?? 0;
 
-  // Convert spots to city list for mood overlay
-  const cities = data?.spots
-    .map(spot => {
-      const cityName = spot.label.includes(',') 
-        ? spot.label.split(',')[0].trim() 
-        : spot.label;
-      return {
-        city: cityName,
-        lat: spot.lat,
-        lng: spot.lon
-      };
-    })
-    .filter(c => c.city !== "Unknown" && c.city !== "United States") || [];
-
-  // Group moods by quadrant
-  const moodsByQuadrant: Record<string, MoodCategory[]> = {
-    lower_left: [],
-    lower_right: [],
-    upper_left: [],
-    upper_right: []
-  };
-
-  moods.forEach(mood => {
-    const pos = mood.quadrant_position || 'lower_left';
-    if (moodsByQuadrant[pos]) {
-      moodsByQuadrant[pos].push(mood);
-    }
-  });
-
-  // Calculate quadrant positions (in SVG coordinates)
-  const getQuadrantPosition = (quadrant: string) => {
-    const gridWidth = 28;  // Space for 2x2 grid of 12x12 boxes with gaps
-    const gridHeight = 32; // +4 for label space
-    
-    switch (quadrant) {
-      case 'lower_left':
-        return { x: 3, y: ROWS - 1 - gridHeight };  // Moved down (less subtraction) and left (smaller x)
-      case 'lower_right':
-        return { x: COLS - 8 - gridWidth, y: ROWS - 8 - gridHeight };
-      case 'upper_left':
-        return { x: 8, y: 8 + 4 };  // +4 for label
-      case 'upper_right':
-        return { x: COLS - 8 - gridWidth, y: 8 + 4 };
-      default:
-        return { x: 3, y: ROWS - 4 - gridHeight };
-    }
-  };
-
   return (
     <div className="bg-accent rounded-lg p-4 w-full">
       <div className="flex items-center justify-between mb-3">
-        {/* Left side - Listening now with headphones */}
         <div className="flex items-center gap-2">
           <Headphones className="h-4 w-4 text-primary" />
           <span className="font-semibold text-foreground text-sm">Listening now</span>
         </div>
 
-        {/* Right side - Listener count */}
         <div className="flex items-center gap-2">
           <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
           <span className="font-mono text-sm text-foreground tabular-nums">
@@ -322,7 +167,11 @@ export function ListenerMap({ nowPlaying }: ListenerMapProps) {
           role="img"
           aria-label={`${total} people listening to OTW Radio right now`}
         >
-          <LandDots />
+          <LandDots 
+            color={aggregateColor} 
+            isFlashing={isFlashing}
+            flashColor={flashColor ? `hsl(${flashColor})` : aggregateColor}
+          />
 
           {data?.spots.map((spot) => {
             const { x, y } = project(spot.lat, spot.lon);
@@ -341,109 +190,11 @@ export function ListenerMap({ nowPlaying }: ListenerMapProps) {
           })}
 
           <MapOverlayManager width={COLS} height={ROWS}>
-            <MoodMapOverlay 
-              width={COLS} 
-              height={ROWS}
-              cities={cities}
-            />
             <ShowsMapOverlay 
               width={COLS} 
               height={ROWS}
             />
           </MapOverlayManager>
-
-          {/* Vibe Check - Interactive mood buttons in quadrants */}
-          {moodEnabled && Object.entries(moodsByQuadrant).map(([quadrant, quadrantMoods]) => {
-            if (quadrantMoods.length === 0) return null;
-            
-            const pos = getQuadrantPosition(quadrant);
-            const boxSize = 12;  // Much smaller
-            const gap = 2;       // Smaller gap
-            
-            return (
-              <g key={quadrant} className="vibe-check-quadrant">
-                {/* Label - smaller */}
-                <text 
-                  x={pos.x} 
-                  y={pos.y - 1} 
-                  className="fill-foreground font-semibold"
-                  style={{ fontSize: '4px' }}
-                >
-                  Vibe Check
-                </text>
-                
-                {/* Mood squares in 2x2 grid */}
-                {quadrantMoods.map((mood, idx) => {
-                  // Arrange in 2x2 grid
-                  const col = idx % 2;
-                  const row = Math.floor(idx / 2);
-                  const boxX = pos.x + (col * (boxSize + gap));
-                  const boxY = pos.y + (row * (boxSize + gap));
-                  
-                  return (
-                    <g 
-                      key={mood.id}
-                      className="cursor-pointer"
-                      onClick={() => handleMoodTap(mood)}
-                      style={{ pointerEvents: cooldown > 0 ? 'none' : 'auto' }}
-                    >
-                      {/* Colored square background */}
-                      <rect
-                        x={boxX}
-                        y={boxY}
-                        width={boxSize}
-                        height={boxSize}
-                        rx={1.5}
-                        fill={`hsl(${mood.color_hsl})`}
-                        opacity={cooldown > 0 ? 0.5 : 0.9}
-                        className="transition-all"
-                        style={{
-                          filter: tappedEmoji === mood.emoji 
-                            ? `drop-shadow(0 0 2px hsl(${mood.color_hsl}))` 
-                            : undefined
-                        }}
-                      >
-                        {tappedEmoji === mood.emoji && (
-                          <animate
-                            attributeName="opacity"
-                            values="0.9;1;0.9"
-                            dur="0.6s"
-                            repeatCount="1"
-                          />
-                        )}
-                      </rect>
-                      
-                      {/* Emoji - smaller and centered */}
-                      <text
-                        x={boxX + boxSize / 2}
-                        y={boxY + boxSize / 2 + 2}
-                        textAnchor="middle"
-                        dominantBaseline="middle"
-                        style={{ fontSize: '8px' }}
-                      >
-                        {mood.emoji}
-                      </text>
-                      
-                      {/* Tooltip */}
-                      <title>{mood.label}</title>
-                    </g>
-                  );
-                })}
-                
-                {/* Cooldown timer */}
-                {cooldown > 0 && (
-                  <text
-                    x={pos.x}
-                    y={pos.y + (boxSize + gap) * 2 + 3}
-                    className="fill-primary font-mono"
-                    style={{ fontSize: '4px' }}
-                  >
-                    {cooldown}s
-                  </text>
-                )}
-              </g>
-            );
-          })}
         </svg>
       </div>
     </div>
