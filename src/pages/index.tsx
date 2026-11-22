@@ -1,11 +1,9 @@
 import { useEffect, useState, useRef } from "react";
-import { Play, Pause, Volume2, VolumeX } from "lucide-react";
+import { Play, Pause } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Slider } from "@/components/ui/slider";
 import { useRouter } from "next/router";
-import { ScheduleCard } from "@/pages/embed/schedule";
 import { ListenerMap } from "@/components/ListenerMap";
-import { MoodTap } from "@/components/MoodTap";
+import { VibeCheckBar } from "@/components/VibeCheckBar";
 
 interface NowPlaying {
     now_playing: {
@@ -25,7 +23,6 @@ interface NowPlaying {
     };
 }
 
-// Only allow https images/links in the banner query params.
 function safeUrl(value: string | string[] | undefined): string | null {
     if (typeof value !== "string") return null;
     try {
@@ -38,17 +35,16 @@ function safeUrl(value: string | string[] | undefined): string | null {
 
 export default function EmbedPlayer() {
     const router = useRouter();
-    // Optional banner: /?banner=https://.../ad.jpg&link=https://...
     const bannerSrc = safeUrl(router.query.banner);
     const bannerLink = safeUrl(router.query.link);
-    const [nowPlaying, setNowPlaying] = useState < NowPlaying | null > (null);
+    const [nowPlaying, setNowPlaying] = useState<NowPlaying | null>(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const [isMuted, setIsMuted] = useState(false);
     const [volume, setVolume] = useState(80);
     const [loadError, setLoadError] = useState(false);
-    const audioRef = useRef < HTMLAudioElement | null > (null);
+    const [flashColor, setFlashColor] = useState<string | null>(null);
+    const audioRef = useRef<HTMLAudioElement | null>(null);
 
-    // Initialize audio element once
     useEffect(() => {
         if (typeof window !== "undefined" && !audioRef.current) {
             audioRef.current = new Audio();
@@ -56,27 +52,23 @@ export default function EmbedPlayer() {
         }
     }, []);
 
-    // Update volume
     useEffect(() => {
         if (audioRef.current) {
             audioRef.current.volume = volume / 100;
         }
     }, [volume]);
 
-    // Update mute
     useEffect(() => {
         if (audioRef.current) {
             audioRef.current.muted = isMuted;
         }
     }, [isMuted]);
 
-    // Fetch now playing data
     useEffect(() => {
         const fetchNowPlaying = async () => {
             try {
-                // Use our cached API endpoint instead of direct AzuraCast
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
+                const timeoutId = setTimeout(() => controller.abort(), 5000);
 
                 const res = await fetch("/api/now-playing", {
                     signal: controller.signal
@@ -90,7 +82,6 @@ export default function EmbedPlayer() {
                 setNowPlaying(data);
                 setLoadError(false);
 
-                // Set audio source if we don't have one yet
                 if (audioRef.current && data.station.listen_url && !audioRef.current.src) {
                     audioRef.current.src = data.station.listen_url;
                 }
@@ -100,17 +91,12 @@ export default function EmbedPlayer() {
             }
         };
 
-        // Fetch immediately
         fetchNowPlaying();
-
-        // Then poll every 15 seconds (our endpoint has 10s cache)
         const interval = setInterval(fetchNowPlaying, 15000);
 
         return () => clearInterval(interval);
     }, []);
 
-    // When embedded in an iframe, tell the host page our height so the iframe
-    // grows/shrinks with the schedule instead of scrolling or clipping.
     useEffect(() => {
         if (typeof window === "undefined" || window.parent === window) return;
         const send = () =>
@@ -140,19 +126,21 @@ export default function EmbedPlayer() {
         }
     };
 
-    const toggleMute = () => setIsMuted(!isMuted);
+    const handleVibeSubmit = (vibe: string, color: string) => {
+        // Trigger map flash
+        setFlashColor(color);
+        setTimeout(() => setFlashColor(null), 100); // Reset trigger
+    };
 
     const song = nowPlaying?.now_playing.song;
     const isLive = nowPlaying?.live?.is_live ?? false;
     const streamerName = nowPlaying?.live?.streamer_name;
 
     return (
-        // Top-aligned (not vertically centered) so the player never moves
-        // when the schedule below opens or closes.
         <div className="bg-background p-4">
-            <div className="w-full max-w-md mx-auto">
+            <div className="w-full max-w-md mx-auto space-y-4">
                 {bannerSrc && (
-                    <div className="mb-3 overflow-hidden rounded-lg">
+                    <div className="overflow-hidden rounded-lg">
                         {bannerLink ? (
                             <a href={bannerLink} target="_blank" rel="noopener noreferrer sponsored">
                                 <img src={bannerSrc} alt="Sponsor" className="block w-full h-auto" />
@@ -162,8 +150,9 @@ export default function EmbedPlayer() {
                         )}
                     </div>
                 )}
+
+                {/* Audio Player */}
                 <div className="flex items-center gap-4 bg-accent rounded-lg p-4">
-                    {/* Album art or placeholder */}
                     <div className="w-16 h-16 rounded bg-muted flex-shrink-0 overflow-hidden">
                         {song?.art ? (
                             <img
@@ -178,7 +167,6 @@ export default function EmbedPlayer() {
                         )}
                     </div>
 
-                    {/* Song info */}
                     <div className="flex-1 min-w-0">
                         {loadError ? (
                             <>
@@ -224,7 +212,6 @@ export default function EmbedPlayer() {
                         )}
                     </div>
 
-                    {/* Play button */}
                     <div className="flex items-center gap-2">
                         <Button
                             onClick={togglePlay}
@@ -242,17 +229,18 @@ export default function EmbedPlayer() {
                     </div>
                 </div>
 
-                {/* Listener Map with Vibe Check in lower left */}
-                <div className="mt-4">
-                    <ListenerMap nowPlaying={song ? {
-                        title: song.title,
-                        artist: song.artist,
-                        id: undefined
-                    } : undefined} />
-                </div>
+                {/* Vibe Check Bar */}
+                <VibeCheckBar 
+                  nowPlaying={song ? {
+                    title: song.title,
+                    artist: song.artist,
+                    id: undefined
+                  } : undefined}
+                  onVibeSubmit={handleVibeSubmit}
+                />
 
-                {/* Schedule */}
-               
+                {/* Listener Map */}
+                <ListenerMap flashColor={flashColor} />
             </div>
         </div>
     );
