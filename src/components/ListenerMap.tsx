@@ -6,10 +6,10 @@ import { ShowsMapOverlay } from "./map/ShowsMapOverlay";
 
 // CONFIGURATION - Easy to tweak
 const CONFIG = {
-  REFRESH_MS: 120000, // 2 minutes
+  REFRESH_MS: 60000, // 2 minutes
   AGGREGATE_WINDOW: 100, // Last N submissions
-  LAND_COLOR_SATURATION: 0.3, // 0-1, how vivid the land color is
-  FLASH_DURATION_MS: 2000,
+  LAND_COLOR_SATURATION: 0.8, // 0-1, how vivid the land color is
+  FLASH_DURATION_MS: 1500,
   FADE_TO_AGGREGATE_MS: 3000,
 };
 
