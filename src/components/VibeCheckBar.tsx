@@ -17,6 +17,7 @@ interface VibeCheckBarProps {
     id?: string;
   };
   onVibeSubmit?: (vibe: string, color: string) => void;
+  compact?: boolean;
 }
 
 type Vibe = {
@@ -27,7 +28,7 @@ type Vibe = {
   color_hsl: string;
 };
 
-export function VibeCheckBar({ nowPlaying, onVibeSubmit }: VibeCheckBarProps) {
+export function VibeCheckBar({ nowPlaying, onVibeSubmit, compact }: VibeCheckBarProps) {
   const [enabled, setEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [vibes, setVibes] = useState<Vibe[]>([]);
@@ -189,17 +190,17 @@ export function VibeCheckBar({ nowPlaying, onVibeSubmit }: VibeCheckBarProps) {
   return (
     <div className="w-full">
       {/* Mobile: Full width, large targets */}
-      <div className="flex items-center justify-center gap-3 px-4 py-3 bg-accent/50 backdrop-blur-sm rounded-lg border border-primary/10 sm:hidden">
-        <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Vibe Check</span>
-        <div className="flex items-center gap-3 flex-1 justify-center">
+      <div className={`flex items-center justify-center ${compact ? 'gap-2 px-2 py-1.5' : 'gap-3 px-4 py-3'} bg-accent/50 backdrop-blur-sm rounded-lg border border-primary/10 sm:hidden`}>
+        {!compact && <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Vibe Check</span>}
+        <div className="flex items-center gap-2 flex-1 justify-center">
           {vibes.map(vibe => (
             <button
               key={vibe.id}
               onClick={() => handleVibeTap(vibe)}
               className={`
-                text-4xl transition-all duration-200 hover:scale-110 active:scale-95
-                min-w-[60px] min-h-[60px] flex items-center justify-center
-                rounded-lg
+                transition-all duration-200 hover:scale-110 active:scale-95
+                flex items-center justify-center rounded-lg
+                ${compact ? 'text-2xl min-w-[44px] min-h-[44px]' : 'text-4xl min-w-[60px] min-h-[60px]'}
                 ${tappedEmoji === vibe.emoji ? "scale-125" : ""}
               `}
               title={vibe.label}
@@ -218,14 +219,15 @@ export function VibeCheckBar({ nowPlaying, onVibeSubmit }: VibeCheckBarProps) {
       </div>
 
       {/* Desktop: Centered, compact */}
-      <div className="hidden sm:flex items-center justify-center gap-3 px-6 py-2 bg-accent/50 backdrop-blur-sm rounded-full border border-primary/10 mx-auto max-w-md">
-        <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Vibe Check</span>
+      <div className={`hidden sm:flex items-center justify-center ${compact ? 'gap-2 px-4 py-1.5' : 'gap-3 px-6 py-2'} bg-accent/50 backdrop-blur-sm rounded-full border border-primary/10 mx-auto max-w-md`}>
+        {!compact && <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Vibe Check</span>}
         {vibes.map(vibe => (
           <button
             key={vibe.id}
             onClick={() => handleVibeTap(vibe)}
             className={`
-              text-3xl transition-all duration-200 hover:scale-125 active:scale-95
+              transition-all duration-200 hover:scale-125 active:scale-95
+              ${compact ? 'text-2xl min-w-[40px] min-h-[40px]' : 'text-3xl'}
               ${tappedEmoji === vibe.emoji ? "scale-150" : ""}
             `}
             title={vibe.label}

@@ -29,6 +29,7 @@ interface ListenersData {
 
 interface ListenerMapProps {
   flashColor?: string | null; // HSL string for local flash
+  compact?: boolean;
 }
 
 const COLS = LAND_ROWS[0].length;
@@ -71,7 +72,7 @@ const LandDots = memo(function LandDots({ color, isFlashing, flashColor }: LandD
   );
 });
 
-export function ListenerMap({ flashColor }: ListenerMapProps) {
+export function ListenerMap({ flashColor, compact }: ListenerMapProps) {
   const [data, setData] = useState<ListenersData | null>(null);
   const [aggregateColor, setAggregateColor] = useState<string>("hsl(0 0% 20%)"); // Default gray
   const [isFlashing, setIsFlashing] = useState(false);
@@ -144,26 +145,26 @@ export function ListenerMap({ flashColor }: ListenerMapProps) {
   const total = data?.total ?? 0;
 
   return (
-    <div className="bg-accent rounded-lg p-4 w-full">
-      <div className="flex items-center justify-between mb-3">
+    <div className={`bg-accent rounded-lg w-full flex flex-col ${compact ? 'p-2 h-full' : 'p-4'}`}>
+      <div className={`flex items-center justify-between ${compact ? 'mb-1' : 'mb-3'}`}>
         <div className="flex items-center gap-2">
-          <Headphones className="h-4 w-4 text-primary" />
-          <span className="font-semibold text-foreground text-sm">Listening now</span>
+          <Headphones className={`${compact ? 'h-3 w-3' : 'h-4 w-4'} text-primary`} />
+          <span className={`font-semibold text-foreground ${compact ? 'text-[10px]' : 'text-sm'}`}>Listening now</span>
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
-          <span className="font-mono text-sm text-foreground tabular-nums">
+          <span className={`${compact ? 'h-1.5 w-1.5' : 'h-2 w-2'} rounded-full bg-primary animate-pulse`} />
+          <span className={`font-mono text-foreground tabular-nums ${compact ? 'text-[10px]' : 'text-sm'}`}>
             {data ? total.toLocaleString("en-US") : "--"}
           </span>
         </div>
       </div>
 
-      <div className="relative">
+      <div className={`relative ${compact ? 'flex-1 min-h-0 flex items-center justify-center' : ''}`}>
         <svg
           ref={svgRef}
           viewBox={`0 0 ${COLS} ${ROWS}`}
-          className="w-full h-auto block"
+          className={`block ${compact ? 'w-full h-full max-h-[160px] object-contain' : 'w-full h-auto'}`}
           role="img"
           aria-label={`${total} people listening to OTW Radio right now`}
         >
