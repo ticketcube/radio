@@ -81,7 +81,6 @@ function ScheduleRow({ item, showNow = true }: { item: ScheduleItem; showNow?: b
             </span>
             <div className="flex-1 min-w-0">
                 <div className="font-semibold text-foreground text-sm truncate">{item.name}</div>
-                {item.description && <div className="text-muted text-xs truncate">{item.description}</div>}
             </div>
             {live && <span className="h-2 w-2 rounded-full bg-primary animate-pulse shrink-0" />}
         </li>
