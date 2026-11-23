@@ -90,19 +90,26 @@ export function VibeCheckBar({ nowPlaying, onVibeSubmit, compact }: VibeCheckBar
   }, [supabase]);
 
   const handleVibeTap = async (vibe: Vibe) => {
+    console.log('🎯 VIBE TAP:', vibe.emoji, vibe.label);
+    
     // IMMEDIATE visual feedback - this MUST happen first, synchronously
     setTappedEmoji(vibe.emoji);
     
     // Haptic feedback on mobile
     if (typeof navigator !== "undefined" && navigator.vibrate) {
       navigator.vibrate(CONFIG.HAPTIC_DURATION_MS);
+      console.log('📳 Haptic fired');
     }
     
     // Flash timer
-    const flashTimer = setTimeout(() => setTappedEmoji(null), CONFIG.FLASH_DURATION_MS);
+    const flashTimer = setTimeout(() => {
+      setTappedEmoji(null);
+      console.log('⏰ Flash timer cleared');
+    }, CONFIG.FLASH_DURATION_MS);
 
     // Notify parent for map flash
     if (onVibeSubmit) {
+      console.log('🗺️ Calling onVibeSubmit with color:', vibe.color_hsl);
       onVibeSubmit(vibe.category_name, vibe.color_hsl);
     }
 
@@ -111,6 +118,7 @@ export function VibeCheckBar({ nowPlaying, onVibeSubmit, compact }: VibeCheckBar
     const timeSince = (now - lastSubmit) / 1000;
     
     if (timeSince < CONFIG.RATE_LIMIT_SECONDS) {
+      console.log('⏱️ Rate limited (client-side):', timeSince, 'seconds since last');
       // Visual feedback still happened, just don't submit
       return;
     }
@@ -118,9 +126,11 @@ export function VibeCheckBar({ nowPlaying, onVibeSubmit, compact }: VibeCheckBar
     try {
       // Lazy anonymous auth
       if (!sessionReady) {
+        console.log('🔐 Initializing anonymous session...');
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
           await supabase.auth.signInAnonymously();
+          console.log('✅ Anonymous session created');
         }
         setSessionReady(true);
       }
@@ -128,9 +138,11 @@ export function VibeCheckBar({ nowPlaying, onVibeSubmit, compact }: VibeCheckBar
       const { data: { user } } = await supabase.auth.getUser();
       
       if (!user) {
-        console.error("No user session");
+        console.error("❌ No user session");
         return;
       }
+
+      console.log('👤 User ID:', user.id);
 
       // Check rate limit via database
       const { data: recentVibe } = await supabase
@@ -146,16 +158,20 @@ export function VibeCheckBar({ nowPlaying, onVibeSubmit, compact }: VibeCheckBar
         const timeSinceLastSubmission = (Date.now() - lastSubmission) / 1000;
 
         if (timeSinceLastSubmission < CONFIG.RATE_LIMIT_SECONDS) {
+          console.log('⏱️ Rate limited (database):', timeSinceLastSubmission, 'seconds since last');
           return; // Silent rate limit
         }
       }
 
       // Get city from IP
+      console.log('🌍 Fetching city from IP...');
       const cityResponse = await fetch("/api/mood/get-city");
       const cityData = await cityResponse.json();
       const city = cityData.city || "Unknown";
+      console.log('📍 City:', city);
 
       // Insert vibe
+      console.log('💾 Inserting vibe to database...');
       const { error: insertError } = await supabase
         .from("mood_changes")
         .insert({
@@ -169,15 +185,17 @@ export function VibeCheckBar({ nowPlaying, onVibeSubmit, compact }: VibeCheckBar
         });
 
       if (insertError) {
+        console.error('❌ Insert error:', insertError);
         throw insertError;
       }
 
+      console.log('✅ Vibe submitted successfully');
       setLastSubmit(now);
       toast.success(`${vibe.emoji} ${vibe.label}`, {
         duration: 2000
       });
     } catch (err) {
-      console.error("Vibe submission error:", err);
+      console.error("❌ Vibe submission error:", err);
     } finally {
       clearTimeout(flashTimer);
     }

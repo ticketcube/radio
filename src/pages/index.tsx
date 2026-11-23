@@ -146,8 +146,12 @@ export default function Home() {
     };
 
     const handleVibeSubmit = (vibe: string, color: string) => {
+        console.log('🎨 INDEX: Vibe submitted, setting flash color:', color);
         setFlashColor(color);
-        setTimeout(() => setFlashColor(null), 100);
+        setTimeout(() => {
+            setFlashColor(null);
+            console.log('🎨 INDEX: Flash color cleared');
+        }, 100);
     };
 
     const song = nowPlaying?.now_playing.song;

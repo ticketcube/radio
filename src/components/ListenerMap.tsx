@@ -135,8 +135,12 @@ export function ListenerMap({ flashColor, compact }: ListenerMapProps) {
   // Handle flash from parent
   useEffect(() => {
     if (flashColor) {
+      console.log('⚡ MAP FLASH TRIGGERED! Color:', flashColor);
       setIsFlashing(true);
-      const timer = setTimeout(() => setIsFlashing(false), CONFIG.FLASH_DURATION_MS);
+      const timer = setTimeout(() => {
+        setIsFlashing(false);
+        console.log('⚡ Flash complete, fading to aggregate');
+      }, CONFIG.FLASH_DURATION_MS);
       return () => clearTimeout(timer);
     }
   }, [flashColor]);
