@@ -267,10 +267,6 @@ export default function Home() {
                     <div className={isCompact ? 'flex-1 min-h-0' : ''}>
                         <ListenerMap flashColor={flashColor} compact={isCompact} />
                     </div>
-
-                    <div className="w-full max-w-md">
-                        <ScheduleCard />
-                    </div>
                 </div>
             </div>
         </div>
