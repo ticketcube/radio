@@ -9,8 +9,8 @@ const CONFIG = {
   REFRESH_MS: 120000, // 2 minutes
   AGGREGATE_WINDOW: 100, // Last N submissions
   LAND_COLOR_SATURATION: 0.3, // 0-1, how vivid the land color is
-  FLASH_DURATION_MS: 1000,
-  FADE_TO_AGGREGATE_MS: 2000,
+  FLASH_DURATION_MS: 1500,
+  FADE_TO_AGGREGATE_MS: 3000,
 };
 
 interface ListenerSpot {
