@@ -46,12 +46,12 @@ export default function Home() {
     const [isCompact, setIsCompact] = useState(false);
     const audioRef = useRef<HTMLAudioElement | null>(null);
 
-    // Detect if we need compact layout based on height constraint OR iframe
+    // Detect if we need compact layout - ALWAYS compact in iframe
     useEffect(() => {
         const checkCompact = () => {
             const inIframe = window.self !== window.top;
-            const heightConstrained = window.innerHeight <= 600;
-            setIsCompact(inIframe || heightConstrained);
+            // If in iframe, always compact. Otherwise check height.
+            setIsCompact(inIframe ? true : window.innerHeight <= 600);
         };
         checkCompact();
         window.addEventListener('resize', checkCompact);
