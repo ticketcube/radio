@@ -5,7 +5,7 @@ import { createClient } from "@/integrations/supabase/client";
 // CONFIGURATION - Easy to tweak
 const CONFIG = {
   RATE_LIMIT_SECONDS: 15,
-  FLASH_DURATION_MS: 500,
+  FLASH_DURATION_MS: 1000,
   HAPTIC_DURATION_MS: 50,
   POLL_INTERVAL_MS: 120000,
 };
