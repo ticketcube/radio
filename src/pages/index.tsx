@@ -151,7 +151,7 @@ export default function Home() {
         setTimeout(() => {
             setFlashColor(null);
             console.log('🎨 INDEX: Flash color cleared');
-        }, 100);
+        }, 1100);
     };
 
     const song = nowPlaying?.now_playing.song;
