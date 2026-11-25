@@ -1,232 +1,109 @@
 import { useState, useEffect } from "react";
-import { MapPin, ExternalLink, Calendar, MapPinned } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { project } from "@/lib/mapProjection";
 
-interface Show {
+export interface ShowItem {
   id: string;
   artist_name: string;
   venue_name: string;
+  event_date: string;
+  ticket_url: string | null;
+  price_min: number | null;
+  price_max: number | null;
+}
+
+export interface ShowCityGroup {
   city: string;
   lat: number;
   lng: number;
-  show_date: string;
-  ticket_url: string | null;
-  ticket_status: string | null;
-  image_url: string | null;
+  count: number;
+  shows: ShowItem[];
 }
 
 interface ShowsMapOverlayProps {
-  width: number;
-  height: number;
+  active: boolean;
+  selectedCity: string | null;
+  onSelectCity: (group: ShowCityGroup | null) => void;
+  onData?: (cities: ShowCityGroup[]) => void;
 }
 
-const POLLING_INTERVAL_MS = 120000; // 2 minutes
+const POLLING_INTERVAL_MS = 180000;
 
-export function ShowsMapOverlay({ width, height }: ShowsMapOverlayProps) {
-  const [enabled, setEnabled] = useState(false);
-  const [shows, setShows] = useState<Show[]>([]);
-  const [selectedShow, setSelectedShow] = useState<Show | null>(null);
-  const [hoveredShow, setHoveredShow] = useState<string | null>(null);
+export function ShowsMapOverlay({
+  active,
+  selectedCity,
+  onSelectCity,
+  onData,
+}: ShowsMapOverlayProps) {
+  const [cities, setCities] = useState<ShowCityGroup[]>([]);
+  const [hovered, setHovered] = useState<string | null>(null);
 
   useEffect(() => {
-    checkFeatureFlag();
-  }, []);
-
-  useEffect(() => {
-    if (enabled) {
-      fetchShows();
-      const interval = setInterval(fetchShows, POLLING_INTERVAL_MS);
-      return () => clearInterval(interval);
-    }
-  }, [enabled]);
-
-  const checkFeatureFlag = async () => {
-    try {
-      const now = Date.now();
-      const cachedFlag = sessionStorage.getItem('shows_map_flag');
-      const cachedFlagTime = sessionStorage.getItem('shows_map_flag_time');
-      
-      // Use 5-minute cache
-      if (cachedFlag && cachedFlagTime && (now - parseInt(cachedFlagTime)) < 300000) {
-        setEnabled(cachedFlag === 'true');
-        return;
+    const fetchShows = async () => {
+      try {
+        const response = await fetch("/api/shows/upcoming");
+        if (!response.ok) return;
+        const result = await response.json();
+        const data: ShowCityGroup[] = result.data || [];
+        setCities(data);
+        onData?.(data);
+      } catch (error) {
+        console.error("Error fetching shows:", error);
       }
-      
-      // Fetch from cached API
-      const response = await fetch("/api/feature-flags-cached");
-      const result = await response.json();
-      const flag = result.data?.find((f: any) => f.flag_name === "shows_map_enabled");
-      const isEnabled = flag?.enabled || false;
-      
-      setEnabled(isEnabled);
-      sessionStorage.setItem('shows_map_flag', String(isEnabled));
-      sessionStorage.setItem('shows_map_flag_time', String(now));
-    } catch (error) {
-      console.error("Error checking shows_map_enabled flag:", error);
-    }
-  };
-
-  const fetchShows = async () => {
-    try {
-      const response = await fetch("/api/shows/upcoming");
-      if (!response.ok) return;
-      const result = await response.json();
-      setShows(result.data || []);
-    } catch (error) {
-      console.error("Error fetching shows:", error);
-    }
-  };
-
-  const latLngToPixel = (lat: number, lng: number) => {
-    // Mercator projection
-    const x = ((lng + 180) / 360) * width;
-    const latRad = (lat * Math.PI) / 180;
-    const mercN = Math.log(Math.tan(Math.PI / 4 + latRad / 2));
-    const y = (height / 2) - (width * mercN) / (2 * Math.PI);
-    return { x, y };
-  };
-
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString("en-US", { 
-      weekday: "short", 
-      month: "short", 
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit"
-    });
-  };
-
-  const getTicketStatusBadge = (status: string | null) => {
-    if (!status) return null;
-    
-    const variants: Record<string, { variant: "default" | "secondary" | "destructive"; text: string }> = {
-      "available": { variant: "default", text: "Tickets Available" },
-      "few left": { variant: "secondary", text: "Few Left" },
-      "resale only": { variant: "destructive", text: "Resale Only" }
     };
 
-    const config = variants[status.toLowerCase()] || { variant: "secondary", text: status };
-    return <Badge variant={config.variant} className="text-xs">{config.text}</Badge>;
-  };
+    fetchShows();
+    const interval = setInterval(fetchShows, POLLING_INTERVAL_MS);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  if (!enabled) return null;
+  if (!active || cities.length === 0) return null;
+
+  const maxCount = Math.max(1, ...cities.map((c) => c.count));
 
   return (
-    <>
-      {/* Show pins */}
-      <g className="pointer-events-auto">
-        {shows.map(show => {
-          const { x, y } = latLngToPixel(show.lat, show.lng);
-          const isHovered = hoveredShow === show.id;
-          const isSelected = selectedShow?.id === show.id;
+    <g className="pointer-events-auto">
+      {cities.map((group) => {
+        const { x, y } = project(group.lat, group.lng);
+        const r = 0.9 + 2.6 * Math.sqrt(group.count / maxCount);
+        const isSelected = selectedCity === group.city;
+        const isHovered = hovered === group.city;
 
-          return (
-            <g key={show.id}>
-              {/* Pin glow effect */}
-              {(isHovered || isSelected) && (
-                <circle
-                  cx={x}
-                  cy={y}
-                  r={20}
-                  fill="hsl(var(--primary))"
-                  opacity={0.2}
-                  className="animate-pulse"
-                />
-              )}
-              
-              {/* Pin marker */}
-              <g
-                transform={`translate(${x}, ${y})`}
-                onMouseEnter={() => setHoveredShow(show.id)}
-                onMouseLeave={() => setHoveredShow(null)}
-                onClick={() => setSelectedShow(selectedShow?.id === show.id ? null : show)}
-                className="cursor-pointer transition-transform hover:scale-110"
-                style={{ transformOrigin: "center" }}
-              >
-                <circle
-                  r={8}
-                  fill="hsl(var(--primary))"
-                  stroke="hsl(var(--background))"
-                  strokeWidth={2}
-                />
-                <path
-                  d="M-3,-2 L0,-5 L3,-2 L0,2 Z"
-                  fill="hsl(var(--background))"
-                  transform="translate(0, -1)"
-                />
-              </g>
-            </g>
-          );
-        })}
-      </g>
-
-      {/* Selected show popup */}
-      {selectedShow && (
-        <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 z-50 pointer-events-auto max-w-md w-full mx-4">
-          <Card className="border-2 border-primary shadow-2xl overflow-hidden">
-            {selectedShow.image_url && (
-              <img
-                src={selectedShow.image_url}
-                alt={selectedShow.artist_name}
-                className="w-full h-36 object-cover"
+        return (
+          <g
+            key={group.city}
+            onMouseEnter={() => setHovered(group.city)}
+            onMouseLeave={() => setHovered(null)}
+            onClick={() => onSelectCity(isSelected ? null : group)}
+            className="cursor-pointer"
+          >
+            <circle cx={x} cy={y} r={r} className="fill-primary/25">
+              <animate
+                attributeName="r"
+                values={`${r};${r * 1.8};${r}`}
+                dur="3s"
+                repeatCount="indefinite"
               />
-            )}
-            <CardHeader className="pb-3">
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <CardTitle className="text-xl mb-1">{selectedShow.artist_name}</CardTitle>
-                  <div className="flex items-center gap-2 text-sm text-muted">
-                    <Calendar className="w-4 h-4" />
-                    {formatDate(selectedShow.show_date)}
-                  </div>
-                </div>
-                <button
-                  onClick={() => setSelectedShow(null)}
-                  className="text-muted hover:text-foreground transition-colors"
-                >
-                  ✕
-                </button>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex items-start gap-2">
-                <MapPinned className="w-4 h-4 text-primary mt-0.5" />
-                <div className="flex-1">
-                  <div className="font-medium">{selectedShow.venue_name}</div>
-                  <div className="text-sm text-muted">{selectedShow.city}</div>
-                </div>
-              </div>
-
-              {selectedShow.ticket_status && (
-                <div className="flex items-center gap-2">
-                  {getTicketStatusBadge(selectedShow.ticket_status)}
-                </div>
-              )}
-
-              {selectedShow.ticket_url && (
-                <Button
-                  asChild
-                  className="w-full"
-                  size="lg"
-                >
-                  <a 
-                    href={selectedShow.ticket_url} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="flex items-center justify-center gap-2"
-                  >
-                    Get Tickets
-                    <ExternalLink className="w-4 h-4" />
-                  </a>
-                </Button>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      )}
-    </>
+              <animate
+                attributeName="opacity"
+                values="0.6;0;0.6"
+                dur="3s"
+                repeatCount="indefinite"
+              />
+            </circle>
+            <circle
+              cx={x}
+              cy={y}
+              r={r * 0.55 * (isSelected || isHovered ? 1.3 : 1)}
+              className="fill-primary transition-all"
+            >
+              <title>{`${group.city}: ${group.count} show${
+                group.count > 1 ? "s" : ""
+              }`}</title>
+            </circle>
+          </g>
+        );
+      })}
+    </g>
   );
 }
