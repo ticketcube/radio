@@ -124,7 +124,7 @@ export default function AdminShows() {
       lat,
       lng,
       show_date: new Date(form.show_date).toISOString(),
-      ticket_url: form.ticket_url || undefined,
+      ticket_url: form.ticket_url || "",
       ticket_status: form.ticket_status,
       image_url: form.image_url || null,
     };
