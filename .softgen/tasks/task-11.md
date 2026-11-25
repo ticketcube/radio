@@ -1,6 +1,6 @@
 ---
 title: Ticket Link-Out Management
-status: in_progress
+status: done
 priority: high
 type: feature
 tags: [tickets, admin, shows, map]
@@ -18,7 +18,7 @@ Scope locked with user: ticket sales stay external link-out (no Stripe/native ch
 - [x] Admin page `/admin/shows.tsx`: table of all shows (past + upcoming), Add/Edit dialog with fields artist_name, venue_name, city, lat, lng, show_date, ticket_url, ticket_status select, image_url; delete with confirm
 - [x] Link "Shows & Tickets" card into `/admin/index.tsx` dashboard (admin-only)
 - [x] Show `image_url` (when present) in the `ShowsMapOverlay` popup for a richer listener-facing card
-- [ ] Verify end-to-end: add a show as admin, confirm it appears on the map popup with working "Get Tickets" link
+- [x] Verify end-to-end: add a show as admin, confirm it appears on the map popup with working "Get Tickets" link
 
 ## Acceptance
 - An admin can create, edit, and delete a show from `/admin/shows` without touching SQL.
