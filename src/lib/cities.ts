@@ -94,6 +94,60 @@ export const MAJOR_CITIES: CityCoords[] = [
   // Brazil
   { city: "São Paulo", country: "Brazil", lat: -23.55, lng: -46.63 },
   { city: "Rio de Janeiro", country: "Brazil", lat: -22.91, lng: -43.17 },
+
+  // More United States
+  { city: "Cincinnati", country: "United States", lat: 39.10, lng: -84.51 },
+  { city: "Milwaukee", country: "United States", lat: 43.04, lng: -87.91 },
+  { city: "Minneapolis", country: "United States", lat: 44.98, lng: -93.27 },
+  { city: "Pittsburgh", country: "United States", lat: 40.44, lng: -79.99 },
+  { city: "Cleveland", country: "United States", lat: 41.50, lng: -81.69 },
+  { city: "Orlando", country: "United States", lat: 28.54, lng: -81.38 },
+  { city: "Tampa", country: "United States", lat: 27.95, lng: -82.46 },
+  { city: "Raleigh", country: "United States", lat: 35.78, lng: -78.64 },
+  { city: "Kansas City", country: "United States", lat: 39.10, lng: -94.58 },
+  { city: "St. Louis", country: "United States", lat: 38.63, lng: -90.20 },
+  { city: "Salt Lake City", country: "United States", lat: 40.76, lng: -111.89 },
+  { city: "Sacramento", country: "United States", lat: 38.58, lng: -121.49 },
+  { city: "Oklahoma City", country: "United States", lat: 35.47, lng: -97.52 },
+  { city: "Buffalo", country: "United States", lat: 42.89, lng: -78.88 },
+  { city: "Hartford", country: "United States", lat: 41.76, lng: -72.69 },
+  { city: "Providence", country: "United States", lat: 41.82, lng: -71.41 },
+  { city: "Richmond", country: "United States", lat: 37.54, lng: -77.44 },
+  { city: "New Orleans", country: "United States", lat: 29.95, lng: -90.07 },
+  { city: "Baltimore", country: "United States", lat: 39.29, lng: -76.61 },
+
+  // More Canada
+  { city: "Edmonton", country: "Canada", lat: 53.55, lng: -113.49 },
+  { city: "Winnipeg", country: "Canada", lat: 49.90, lng: -97.14 },
+  { city: "Quebec City", country: "Canada", lat: 46.81, lng: -71.21 },
+
+  // More UK & Ireland
+  { city: "Belfast", country: "United Kingdom", lat: 54.60, lng: -5.93 },
+  { city: "Liverpool", country: "United Kingdom", lat: 53.41, lng: -2.98 },
+  { city: "Bristol", country: "United Kingdom", lat: 51.45, lng: -2.59 },
+  { city: "Cardiff", country: "United Kingdom", lat: 51.48, lng: -3.18 },
+  { city: "Newcastle", country: "United Kingdom", lat: 54.98, lng: -1.61 },
+  { city: "Sheffield", country: "United Kingdom", lat: 53.38, lng: -1.47 },
+  { city: "Brighton", country: "United Kingdom", lat: 50.82, lng: -0.14 },
+  { city: "Edinburgh", country: "United Kingdom", lat: 55.95, lng: -3.19 },
+  { city: "Dublin", country: "Ireland", lat: 53.35, lng: -6.26 },
+
+  // Oceania
+  { city: "Christchurch", country: "New Zealand", lat: -43.53, lng: 172.64 },
+  { city: "Auckland", country: "New Zealand", lat: -36.85, lng: 174.76 },
+  { city: "Wellington", country: "New Zealand", lat: -41.29, lng: 174.78 },
+  { city: "Perth", country: "Australia", lat: -31.95, lng: 115.86 },
+  { city: "Adelaide", country: "Australia", lat: -34.93, lng: 138.60 },
+
+  // Scandinavia & Europe
+  { city: "Oslo", country: "Norway", lat: 59.91, lng: 10.75 },
+  { city: "Stockholm", country: "Sweden", lat: 59.33, lng: 18.07 },
+  { city: "Copenhagen", country: "Denmark", lat: 55.68, lng: 12.57 },
+  { city: "Zurich", country: "Switzerland", lat: 47.38, lng: 8.54 },
+  { city: "Vienna", country: "Austria", lat: 48.21, lng: 16.37 },
+  { city: "Warsaw", country: "Poland", lat: 52.23, lng: 21.01 },
+  { city: "Prague", country: "Czech Republic", lat: 50.08, lng: 14.44 },
+  { city: "Lisbon", country: "Portugal", lat: 38.72, lng: -9.14 },
 ];
 
 // Case-insensitive city lookup
