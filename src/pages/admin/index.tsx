@@ -3,7 +3,7 @@ import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Users, Radio, Mic, Settings } from "lucide-react";
+import { Users, Radio, Mic, Settings, Ticket } from "lucide-react";
 import Link from "next/link";
 
 export default function AdminDashboard() {
@@ -82,7 +82,20 @@ export default function AdminDashboard() {
                   </CardContent>
                 </Card>
 
-                
+                <Card>
+                  <CardHeader>
+                    <Ticket className="w-8 h-8 mb-2 text-primary" />
+                    <CardTitle>Shows & Tickets</CardTitle>
+                    <CardDescription>
+                      Manage venue shows and ticket links on the listener map
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <Link href="/admin/shows">
+                      <Button className="w-full">Manage Shows</Button>
+                    </Link>
+                  </CardContent>
+                </Card>
               </>
             )}
           </div>

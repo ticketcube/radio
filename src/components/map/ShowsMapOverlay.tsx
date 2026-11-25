@@ -14,6 +14,7 @@ interface Show {
   show_date: string;
   ticket_url: string | null;
   ticket_status: string | null;
+  image_url: string | null;
 }
 
 interface ShowsMapOverlayProps {
@@ -165,7 +166,14 @@ export function ShowsMapOverlay({ width, height }: ShowsMapOverlayProps) {
       {/* Selected show popup */}
       {selectedShow && (
         <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 z-50 pointer-events-auto max-w-md w-full mx-4">
-          <Card className="border-2 border-primary shadow-2xl">
+          <Card className="border-2 border-primary shadow-2xl overflow-hidden">
+            {selectedShow.image_url && (
+              <img
+                src={selectedShow.image_url}
+                alt={selectedShow.artist_name}
+                className="w-full h-36 object-cover"
+              />
+            )}
             <CardHeader className="pb-3">
               <div className="flex items-start justify-between">
                 <div className="flex-1">
